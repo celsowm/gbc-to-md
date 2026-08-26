@@ -22,7 +22,7 @@ SGDK remains an external dependency and keeps its own license and notices.
 ## m68k-elf GCC toolchain
 
 - Project used by the Linux bootstrap: `iratahack/m68k-elf-gcc`
-- Pinned release: `v14.2.0_latest`
+- Pinned release: `v13.2.0_latest`
 - Purpose here: cross-compiling the SGDK target for Motorola 68000.
 
 ## ROM policy

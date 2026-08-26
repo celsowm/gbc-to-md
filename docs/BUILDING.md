@@ -8,7 +8,7 @@ Pinned versions live in `versions.env`:
 
 - GB Recompiled `v0.1.0`;
 - SGDK `v2.11`;
-- m68k-elf GCC toolchain release `v14.2.0_latest` from `iratahack/m68k-elf-gcc`.
+- m68k-elf GCC toolchain release `v13.2.0_latest` from `iratahack/m68k-elf-gcc`.
 
 ## Host prerequisites
 
