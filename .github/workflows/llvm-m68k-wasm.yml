@@ -1,0 +1,59 @@
+name: LLVM M68k WASM probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/llvm-m68k-wasm.yml'
+      - 'wasm/llvm/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llvm-m68k-wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  llc-m68k:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Emscripten and LLVM build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            emscripten cmake ninja-build git python3 ca-certificates gzip
+          em++ --version
+          cmake --version
+
+      - name: Build M68000-only llc as WebAssembly
+        run: ./wasm/llvm/build-llc-m68k.sh
+
+      - name: Run llc in WebAssembly and validate EM_68K object
+        run: |
+          node wasm/llvm/llc-m68k.test.cjs \
+            build/llvm-m68k-wasm/dist/llc-m68k.js \
+            build/llvm-m68k-wasm/dist/llc-m68k.wasm \
+            wasm/llvm/hello.ll \
+            build/llvm-m68k-wasm/dist/hello-m68k.o
+          readelf -h build/llvm-m68k-wasm/dist/hello-m68k.o
+          readelf -r build/llvm-m68k-wasm/dist/hello-m68k.o
+
+      - name: Record sizes, compressed sizes, and hashes
+        run: |
+          cd build/llvm-m68k-wasm/dist
+          wc -c llc-m68k.js llc-m68k.wasm hello-m68k.o | tee SIZES.txt
+          gzip -9 -c llc-m68k.wasm > llc-m68k.wasm.gz
+          wc -c llc-m68k.wasm.gz | tee -a SIZES.txt
+          sha256sum llc-m68k.js llc-m68k.wasm llc-m68k.wasm.gz hello-m68k.o | tee SHA256SUMS.txt
+
+      - name: Upload W2 proof artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llc-m68k-wasm
+          path: build/llvm-m68k-wasm/dist/
