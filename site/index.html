@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Analyze a Game Boy or Game Boy Color ROM for gbc-to-md compatibility directly in your browser.">
+  <title>gbc-to-md playground</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <nav><span class="brand">gbc-to-md</span><a href="https://github.com/celsowm/gbc-to-md">GitHub ↗</a></nav>
+    <section class="hero">
+      <div class="eyebrow">Static recompilation experiment</div>
+      <h1>Game Boy → Mega Drive</h1>
+      <p>Inspect a legally obtained <code>.gb</code> or <code>.gbc</code> ROM locally. Nothing is uploaded. The analyzer reports mapper support, cartridge memory, far-ROM requirements, checksums, and current project limitations.</p>
+    </section>
+
+    <section class="grid">
+      <div id="drop-zone" class="panel drop" tabindex="0" role="button" aria-label="Choose or drop a Game Boy ROM">
+        <div>
+          <div class="drop-icon">↓</div>
+          <h2>Drop a ROM here</h2>
+          <p>or click to choose a <strong>.gb</strong> / <strong>.gbc</strong> file<br>Processed only in this browser</p>
+          <input id="rom-input" type="file" accept=".gb,.gbc,application/octet-stream">
+        </div>
+      </div>
+
+      <aside class="panel">
+        <div id="empty-state" class="empty">ROM metadata and compatibility details will appear here after you select a file.</div>
+        <div id="result" class="result" hidden>
+          <div class="result-top"><div><div class="filename" id="file-name"></div><strong id="title"></strong></div><span id="status-pill" class="pill"></span></div>
+          <dl>
+            <dt>Mode</dt><dd id="mode"></dd>
+            <dt>Cartridge</dt><dd id="cartridge"></dd>
+            <dt>Mapper</dt><dd id="mapper"></dd>
+            <dt>ROM</dt><dd id="rom-size"></dd>
+            <dt>Cartridge RAM</dt><dd id="ram-size"></dd>
+            <dt>Mega Drive ROM path</dt><dd id="far-rom"></dd>
+            <dt>CGB features</dt><dd id="cgb"></dd>
+            <dt>Header checksum</dt><dd id="header-checksum"></dd>
+            <dt>Global checksum</dt><dd id="global-checksum"></dd>
+          </dl>
+          <ul id="warnings" class="warnings"></ul>
+          <div class="actions"><button id="convert-button" disabled>Convert to Mega Drive</button></div>
+          <div class="note">Browser conversion is the next milestone. The current production pipeline uses GB Recompiled + GBRT-SGDK + m68k-elf GCC + SGDK in CI.</div>
+        </div>
+      </aside>
+    </section>
+    <footer><span>Experimental — a compatible header does not guarantee whole-game compatibility.</span><span>No ROM data leaves your browser.</span></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

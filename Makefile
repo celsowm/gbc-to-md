@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor bootstrap bootstrap-gbrecomp bootstrap-sgdk generate fixtures test upstream-test irq-test timer-test cake-test mbc1-test mbc3-test mbc5-test syntax-test mapper-size verify-ci verify sgdk sgdk-mbc5 clean distclean
+.PHONY: help doctor bootstrap bootstrap-gbrecomp bootstrap-sgdk generate fixtures test upstream-test irq-test timer-test cake-test mbc1-test mbc3-test mbc5-test syntax-test site-test mapper-size verify-ci verify sgdk sgdk-mbc5 clean distclean
 
 help:
 	@printf '%s\n' \
@@ -51,8 +51,10 @@ mbc5-test: bootstrap-gbrecomp
 	@./tests/run_mbc5_tests.sh
 syntax-test: bootstrap-gbrecomp
 	@./tests/run_sgdk_syntax_tests.sh
+site-test: fixtures
+	@node site/analyzer.test.mjs
 
-verify-ci: test upstream-test irq-test timer-test cake-test mbc1-test mbc3-test mbc5-test syntax-test
+verify-ci: test upstream-test irq-test timer-test cake-test mbc1-test mbc3-test mbc5-test syntax-test site-test
 	@echo 'All CI verification targets passed.'
 
 mapper-size: mbc1-test mbc3-test mbc5-test
