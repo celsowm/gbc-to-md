@@ -6,10 +6,15 @@ async function main() {
   if (!modulePath || !romPath || !expectedBanks || !expectedMbc) {
     throw new Error('usage: node probe.test.cjs <module.js> <rom> <banks> <mbc-code>');
   }
-  const createModule = require(path.resolve(modulePath));
+
+  const resolvedModulePath = path.resolve(modulePath);
+  const wasmPath = path.join(path.dirname(resolvedModulePath), 'gbrecomp_probe.wasm');
+  const createModule = require(resolvedModulePath);
   const Module = await createModule({
-    locateFile(file) { return path.join(path.dirname(path.resolve(modulePath)), file); },
+    wasmBinary: fs.readFileSync(wasmPath),
+    locateFile(file) { return path.join(path.dirname(resolvedModulePath), file); },
   });
+
   const rom = fs.readFileSync(romPath);
   const ptr = Module._malloc(rom.length);
   try {
