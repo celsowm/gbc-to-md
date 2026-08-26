@@ -32,7 +32,7 @@ em++ -std=c++20 -O2 \
   -sENVIRONMENT=web,node \
   -sALLOW_MEMORY_GROWTH=1 \
   -sFILESYSTEM=0 \
-  -sEXPORTED_FUNCTIONS='["_gbrecomp_wasm_probe","_gbrecomp_wasm_compile","_gbrecomp_wasm_file_count","_gbrecomp_wasm_file_name_ptr","_gbrecomp_wasm_file_name_size","_gbrecomp_wasm_file_data_ptr","_gbrecomp_wasm_file_data_size","_gbrecomp_wasm_error_ptr","_gbrecomp_wasm_error_size","_malloc","_free"]' \
+  -sEXPORTED_FUNCTIONS='["_gbrecomp_wasm_probe","_gbrecomp_wasm_compile","_gbrecomp_wasm_prepare_sgdk","_gbrecomp_wasm_file_count","_gbrecomp_wasm_file_name_ptr","_gbrecomp_wasm_file_name_size","_gbrecomp_wasm_file_data_ptr","_gbrecomp_wasm_file_data_size","_gbrecomp_wasm_error_ptr","_gbrecomp_wasm_error_size","_malloc","_free"]' \
   -sEXPORTED_RUNTIME_METHODS='["HEAPU8"]' \
   --no-entry \
   -o "$OUT/gbrecomp_probe.js"

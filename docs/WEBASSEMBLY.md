@@ -2,27 +2,54 @@
 
 The long-term playground goal is an entirely local conversion pipeline: a user drops a legally obtained `.gb` or `.gbc` file into the browser, the ROM never leaves the device, and the browser produces a Mega Drive `rom.bin`.
 
-## Why this is feasible
+## Proven milestones
 
-GB Recompiled v0.1.0 separates the recompiler into `gbrecomp_core` and its desktop runtime. `gbrecomp_core` contains the ROM parser, decoder, analyzer, bank tracker, IR, optimizer, and C emitter; SDL is not a dependency of that library. The upstream `ROM` API also provides `load_from_buffer`, so a browser adapter can consume uploaded bytes directly rather than relying on a host filesystem.
+### W0 — `gbrecomp_core` runs as WebAssembly
 
-## Milestones
+Proven by GitHub Actions run `33004253746`.
 
-### W0 — core portability probe
+The pinned GB Recompiled v0.1.0 core compiles under Emscripten without linking the desktop SDL runtime or pthreads. The exported probe accepts ROM bytes directly and correctly parsed both a ROM-only fixture and an MBC1+RAM+battery fixture.
 
-`wasm/build-gbrecomp-probe.sh` builds the pinned upstream `gbrecomp_core` with Emscripten and links a tiny exported function from `wasm/probe.cpp`. The probe receives a ROM byte buffer and returns the parsed ROM-bank count and MBC code.
+### W1 — ROM to generated C entirely in memory
 
-This is intentionally not the final compiler API. Its purpose is to prove that the exact pinned recompiler core can be compiled for WebAssembly without SDL, a native filesystem, or pthreads.
+Also proven by run `33004253746`.
 
-### W1 — in-memory recompiler API
+The browser-oriented adapter performs:
 
-Expose a browser-oriented API that accepts:
+```
+ROM bytes
+  -> ROM::load_from_buffer
+  -> analyze
+  -> IRBuilder::build
+  -> codegen::generate_output
+  -> in-memory generated files
+```
 
-- ROM bytes;
-- optional symbols / annotations;
-- generation options.
+For `basicdemo.gb`, the proof generated 9 C/header/metadata files totaling 363,488 text bytes. No temporary filesystem is needed for the input ROM or generated source exchange.
 
-Return generated C/header files as in-memory buffers. Do not expose the desktop CLI or its parallel-worker machinery to the browser.
+The proven artifact sizes for that run are:
+
+- `gbrecomp_probe.js`: 33,123 bytes
+- `gbrecomp_probe.wasm`: 509,860 bytes
+- WASM SHA-256: `c84ffefd9707e842d02794d7e4563c1755b794bd0907026f077f8d050bdf5278`
+
+The uploaded artifact is `gbrecomp-wasm-probe`, artifact ID `9619984635`.
+
+## Current milestone
+
+### W1.5 — prepare generated sources for SGDK in memory
+
+The browser adapter mirrors the native SGDK preparation:
+
+- remove the desktop `stdio` / `stdlib` dependencies and diagnostic paths from the generated control source;
+- replace direct `rom_data[0x147]` access with `gbrt_sgdk_rom_read8`;
+- discard the generated multi-megabyte `*_rom.c` initializer;
+- discard the desktop `*_main.c` wrapper;
+- create a `.rodata_binf` assembly blob using `.incbin "browserrom.gb"`.
+
+The caller retains the original uploaded ROM bytes and will later provide them to the browser-side M68k compiler virtual filesystem under that name.
+
+## Next milestones
 
 ### W2 — C to Motorola 68000 in the browser
 

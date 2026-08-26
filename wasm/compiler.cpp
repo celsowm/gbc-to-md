@@ -28,6 +28,64 @@ std::string g_last_error;
 void add_file(const std::string &name, const std::string &content) {
     if (!name.empty() && !content.empty()) g_files.push_back({name, content});
 }
+
+GeneratedFile *find_file(const std::string &name) {
+    for (auto &file : g_files) {
+        if (file.name == name) return &file;
+    }
+    return nullptr;
+}
+
+void erase_file(const std::string &name) {
+    for (auto it = g_files.begin(); it != g_files.end(); ++it) {
+        if (it->name == name) {
+            g_files.erase(it);
+            return;
+        }
+    }
+}
+
+void replace_all(std::string &text, const std::string &from, const std::string &to) {
+    size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos) {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+bool erase_if_block(std::string &text, const std::string &marker) {
+    size_t begin = text.find(marker);
+    if (begin == std::string::npos) return false;
+
+    size_t open = text.find('{', begin);
+    if (open == std::string::npos) return false;
+
+    unsigned depth = 0;
+    for (size_t i = open; i < text.size(); ++i) {
+        if (text[i] == '{') {
+            ++depth;
+        } else if (text[i] == '}') {
+            if (--depth == 0) {
+                size_t end = i + 1;
+                while (end < text.size() && (text[end] == '\r' || text[end] == '\n')) ++end;
+                text.erase(begin, end - begin);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool strip_line_containing(std::string &text, const std::string &marker) {
+    size_t pos = text.find(marker);
+    if (pos == std::string::npos) return false;
+    size_t begin = text.rfind('\n', pos);
+    begin = (begin == std::string::npos) ? 0 : begin + 1;
+    size_t end = text.find('\n', pos);
+    end = (end == std::string::npos) ? text.size() : end + 1;
+    text.erase(begin, end - begin);
+    return true;
+}
 }
 
 extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_compile(const uint8_t *data, size_t size) {
@@ -80,6 +138,55 @@ extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_compile(const uint8_t *data, s
         g_last_error = "code generator returned no files";
         return -3;
     }
+    return static_cast<int32_t>(g_files.size());
+}
+
+extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_prepare_sgdk(size_t rom_size) {
+    g_last_error.clear();
+
+    GeneratedFile *main_file = find_file("browserrom.c");
+    if (main_file == nullptr) {
+        g_last_error = "compile must run before SGDK preparation";
+        return -1;
+    }
+
+    std::string &text = main_file->content;
+    replace_all(text, "#include <stdio.h>\n", "");
+    replace_all(text, "#include <stdlib.h>\n", "");
+    replace_all(text,
+                "ctx->mbc_type = rom_data[0x147];",
+                "ctx->mbc_type = gbrt_sgdk_rom_read8(ctx, 0x147u);");
+
+    erase_if_block(text, "if (gbrt_instruction_limit > 0)");
+    strip_line_containing(text,
+                          "if (ctx->trace_entries_enabled) gbrt_log_trace(ctx, bank, addr);");
+    erase_if_block(text, "if (gbrt_trace_enabled)");
+
+    if (text.find("rom_data[0x147]") != std::string::npos) {
+        g_last_error = "failed to rewrite direct ROM header access";
+        return -2;
+    }
+
+    erase_file("browserrom_rom.c");
+    erase_file("browserrom_main.c");
+
+    std::string asm_text =
+        "/* Browser-generated target ROM blob. */\n"
+        ".section .rodata_binf,\"a\"\n"
+        ".balign 4\n"
+        ".global rom_size\n"
+        ".type rom_size,@object\n"
+        "rom_size:\n"
+        "    .long " + std::to_string(rom_size) + "\n"
+        ".size rom_size, 4\n\n"
+        ".balign 2\n"
+        ".global rom_data\n"
+        ".type rom_data,@object\n"
+        "rom_data:\n"
+        "    .incbin \"browserrom.gb\"\n"
+        ".size rom_data, .-rom_data\n";
+    add_file("browserrom_rom.s", asm_text);
+
     return static_cast<int32_t>(g_files.size());
 }
 
