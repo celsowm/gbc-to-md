@@ -79,7 +79,7 @@ jobs:
           find build/artifacts -name rom.bin -printf '%p %s bytes\n' | sort | tee build/artifacts/SIZES.txt
 
       - name: Upload Mega Drive build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mega-drive-roms
           path: build/artifacts/
