@@ -8,8 +8,9 @@ SRC="$BUILD_ROOT/llvm-project"
 HOST="$BUILD_ROOT/host"
 WASM="$BUILD_ROOT/wasm"
 DIST="$BUILD_ROOT/dist"
+CMAKE_BIN="${CMAKE_BIN:-/usr/bin/cmake}"
 
-command -v cmake >/dev/null
+[[ -x "$CMAKE_BIN" ]] || { echo "missing $CMAKE_BIN" >&2; exit 2; }
 command -v ninja >/dev/null
 command -v emcmake >/dev/null
 command -v em++ >/dev/null
@@ -39,10 +40,10 @@ COMMON=(
 )
 
 # LLVM cross builds require a host-native llvm-tblgen from the exact same tree.
-cmake "${COMMON[@]}" -B "$HOST" \
+"$CMAKE_BIN" "${COMMON[@]}" -B "$HOST" \
   -DLLVM_TARGETS_TO_BUILD="" \
   -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=""
-cmake --build "$HOST" --target llvm-tblgen -j "${JOBS:-4}"
+"$CMAKE_BIN" --build "$HOST" --target llvm-tblgen -j "${JOBS:-4}"
 
 # This follows the proven Emscripten LLVM-tool pattern, but keeps only M68k.
 # wait4 is referenced by LLVM's Unix process helpers and is supplied by
@@ -51,7 +52,10 @@ export CXXFLAGS="${CXXFLAGS:-} -Dwait4=__syscall_wait4"
 
 EM_LINK_FLAGS="-s NO_INVOKE_RUN -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=67108864 -s EXPORTED_RUNTIME_METHODS=FS,callMain -s MODULARIZE=1 -s EXPORT_NAME=createLLCM68k -s ENVIRONMENT=web,node -s WASM_BIGINT=1"
 
-emcmake cmake "${COMMON[@]}" -B "$WASM" \
+# Ubuntu 24.04 runners also ship a newer /usr/local CMake. Emscripten 3.1.6's
+# toolchain modules are compatible with Ubuntu's /usr/bin/cmake 3.28, while
+# CMake 3.31 trips over a private UnixPaths command. Pin the system CMake here.
+emcmake "$CMAKE_BIN" "${COMMON[@]}" -B "$WASM" \
   -DCMAKE_BUILD_TYPE=MinSizeRel \
   -DCMAKE_EXE_LINKER_FLAGS="$EM_LINK_FLAGS" \
   -DLLVM_TARGETS_TO_BUILD="" \
@@ -63,7 +67,7 @@ emcmake cmake "${COMMON[@]}" -B "$WASM" \
   -DLLVM_BUILD_TOOLS=ON \
   -DLLVM_INCLUDE_TOOLS=ON
 
-cmake --build "$WASM" --target llc -j "${JOBS:-4}"
+"$CMAKE_BIN" --build "$WASM" --target llc -j "${JOBS:-4}"
 
 [[ -f "$WASM/bin/llc.js" ]] || { echo "missing $WASM/bin/llc.js" >&2; exit 2; }
 [[ -f "$WASM/bin/llc.wasm" ]] || { echo "missing $WASM/bin/llc.wasm" >&2; exit 2; }
