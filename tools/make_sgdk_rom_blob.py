@@ -7,7 +7,7 @@ a=ap.parse_args()
 rom=Path(a.rom); out=Path(a.out); size=rom.stat().st_size
 inc=a.incbin_path or rom.as_posix()
 out.write_text(f'''/* Generated target ROM blob: avoids a multi-megabyte C initializer. */
-.section .rodata
+.section .rodata_binf,"a"
 .balign 4
 .global rom_size
 .type rom_size,@object

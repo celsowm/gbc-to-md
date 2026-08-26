@@ -46,6 +46,7 @@ python3 - "$BUILD_DIR/syntax/mbc5_far_rom_blob.s" <<'PY'
 from pathlib import Path
 import sys
 s=Path(sys.argv[1]).read_text()
+assert '.section .rodata_binf' in s
 assert s.index('rom_size:') < s.index('rom_data:')
 PY
 
