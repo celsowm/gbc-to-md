@@ -1,6 +1,10 @@
 #ifndef GBMD_BACKEND_H
 #define GBMD_BACKEND_H
 
+#ifdef SGDK_GCC
+#include <genesis.h>
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
