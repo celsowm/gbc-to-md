@@ -6,6 +6,7 @@ on:
     paths:
       - 'wasm/**'
       - 'versions.env'
+      - 'scripts/build-wasm-sgdk-bridge.sh'
       - '.github/workflows/wasm.yml'
   workflow_dispatch:
 
@@ -45,3 +46,38 @@ jobs:
           path: |
             build/wasm/dist/gbrecomp_probe.js
             build/wasm/dist/gbrecomp_probe.wasm
+
+  sgdk-bridge:
+    needs: probe
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install SGDK build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential binutils curl git python3 ca-certificates \
+            openjdk-17-jre-headless
+          node --version
+      - name: Cache SGDK dependency downloads
+        uses: actions/cache@v4
+        with:
+          path: .deps/downloads
+          key: gbc-to-md-sgdk-deps-${{ hashFiles('versions.env') }}
+      - name: Bootstrap SGDK and m68k toolchain
+        run: make bootstrap-sgdk
+      - name: Generate bridge fixture
+        run: python3 fixtures/make_basicdemo.py
+      - name: Download WebAssembly artifact from probe job
+        uses: actions/download-artifact@v4
+        with:
+          name: gbrecomp-wasm-probe
+          path: build/wasm/dist
+      - name: Link WASM-generated sources with the real SGDK toolchain
+        run: ./scripts/build-wasm-sgdk-bridge.sh
+      - name: Upload bridge Mega Drive ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-sgdk-bridge-rom
+          path: build/artifacts/wasm-bridge/
