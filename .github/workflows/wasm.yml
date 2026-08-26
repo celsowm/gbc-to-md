@@ -1,0 +1,45 @@
+name: WASM probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'wasm/**'
+      - 'versions.env'
+      - '.github/workflows/wasm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Emscripten build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y emscripten cmake ninja-build git python3
+      - name: Generate synthetic fixtures
+        run: |
+          python3 fixtures/make_basicdemo.py
+          python3 fixtures/make_mbc1test.py
+      - name: Build pinned GB Recompiled core as WebAssembly
+        run: ./wasm/build-gbrecomp-probe.sh
+      - name: Exercise the WebAssembly probe
+        run: |
+          node wasm/probe.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb 2 0
+          node wasm/probe.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/mbc1test.gb 4 1
+      - name: Record sizes and hashes
+        run: |
+          wc -c build/wasm/dist/gbrecomp_probe.js build/wasm/dist/gbrecomp_probe.wasm
+          sha256sum build/wasm/dist/gbrecomp_probe.js build/wasm/dist/gbrecomp_probe.wasm
+      - name: Upload WebAssembly proof artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbrecomp-wasm-probe
+          path: |
+            build/wasm/dist/gbrecomp_probe.js
+            build/wasm/dist/gbrecomp_probe.wasm
