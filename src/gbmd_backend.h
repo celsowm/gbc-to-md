@@ -3,11 +3,11 @@
 
 #ifdef SGDK_GCC
 #include <genesis.h>
-#endif
-
+#else
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#endif
 
 #define GBMD_GB_VRAM_SIZE 0x2000u
 #define GBMD_GB_OAM_SIZE  0x00A0u

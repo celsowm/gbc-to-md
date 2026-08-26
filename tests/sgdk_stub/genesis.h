@@ -1,8 +1,28 @@
 #ifndef GENESIS_H
 #define GENESIS_H
+#ifdef SGDK_GCC
+typedef char s8;
+typedef short s16;
+typedef long s32;
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef unsigned long u32;
+typedef u8 bool;
+#define false 0
+#define true 1
+#define uint8_t u8
+#define int8_t s8
+#define uint16_t u16
+#define int16_t s16
+#define uint32_t u32
+#define int32_t s32
+#define size_t u32
+#else
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef int16_t s16;
+#endif
 typedef int VDPPlane; typedef int TransferMethod;
 #define TRUE true
 #define FALSE false

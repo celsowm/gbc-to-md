@@ -49,4 +49,9 @@ s=Path(sys.argv[1]).read_text()
 assert s.index('rom_size:') < s.index('rom_data:')
 PY
 
+
+# Target-style header mode: SGDK owns bool/stdint/size_t aliases.
+"$CC" "${CFLAGS[@]}" -DSGDK_GCC -DGBRT_SGDK_USE_CART_SRAM -Itests/sgdk_stub -Isgdk_runtime/include -Isrc -c sgdk_runtime/src/gbrt_sgdk_min.c -o "$BUILD_DIR/syntax/gbrt_sgdk_target.o"
+"$CC" "${CFLAGS[@]}" -DSGDK_GCC -Itests/sgdk_stub -Isrc -c src/gbmd_backend.c -o "$BUILD_DIR/syntax/gbmd_sgdk_target.o"
+
 echo "SGDK syntax gates passed."

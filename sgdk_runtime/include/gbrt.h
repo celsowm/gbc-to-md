@@ -1,9 +1,14 @@
 #ifndef GBRT_SGDK_MIN_H
 #define GBRT_SGDK_MIN_H
 
+#ifdef SGDK_GCC
+#include <genesis.h>
+typedef u32 uintptr_t;
+#else
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#endif
 #include "gbmd_backend.h"
 
 typedef enum {
