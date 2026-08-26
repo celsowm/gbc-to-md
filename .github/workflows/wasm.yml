@@ -32,6 +32,8 @@ jobs:
         run: |
           node wasm/probe.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb 2 0
           node wasm/probe.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/mbc1test.gb 4 1
+      - name: Generate C in memory through WebAssembly
+        run: node wasm/compiler.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb
       - name: Record sizes and hashes
         run: |
           wc -c build/wasm/dist/gbrecomp_probe.js build/wasm/dist/gbrecomp_probe.wasm
