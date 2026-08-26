@@ -1,0 +1,38 @@
+# Build and generated output
+/build/
+/dist/
+/.deps/
+
+# Synthetic ROM fixtures are reproducible from fixtures/make_*.py
+/fixtures/*.gb
+/fixtures/*.annotations
+/fixtures/*.sha256
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Native build products
+*.o
+*.a
+*.out
+*.bin
+*.elf
+*.map
+*.lst
+*.d
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
+# Local environment overrides
+.env
+.env.*
+!versions.env
+local.mk

@@ -1,0 +1,85 @@
+name: SGDK build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sgdk.yml'
+      - 'versions.env'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'tools/**'
+      - 'fixtures/**'
+      - 'sgdk/**'
+      - 'sgdk_runtime/**'
+      - 'src/**'
+  pull_request:
+    paths:
+      - '.github/workflows/sgdk.yml'
+      - 'versions.env'
+      - 'Makefile'
+      - 'scripts/**'
+      - 'tools/**'
+      - 'fixtures/**'
+      - 'sgdk/**'
+      - 'sgdk_runtime/**'
+      - 'src/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sgdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential binutils curl git python3 ca-certificates \
+            openjdk-17-jre-headless
+
+      - name: Cache dependency downloads
+        uses: actions/cache@v4
+        with:
+          path: .deps/downloads
+          key: gbc-to-md-sgdk-deps-${{ hashFiles('versions.env') }}
+
+      - name: Bootstrap recompiler, SGDK, and m68k toolchain
+        run: |
+          make bootstrap
+          make bootstrap-sgdk
+
+      - name: Build IRQ-driven cakegame fixture
+        run: make sgdk
+
+      - name: Enable official SEGA mapper in local SGDK checkout
+        run: |
+          source versions.env
+          SGDK="$PWD/.deps/SGDK/$SGDK_VERSION" ./scripts/enable-sgdk-bank-switch.sh
+
+      - name: Build 8 MiB MBC5 far-ROM fixture
+        run: |
+          source versions.env
+          export SGDK="$PWD/.deps/SGDK/$SGDK_VERSION"
+          GAME=mbc5test SGDK_BUILD=release ./scripts/build-sgdk.sh
+
+      - name: Record artifact hashes and sizes
+        run: |
+          sha256sum build/artifacts/*/rom.bin | tee build/artifacts/SHA256SUMS.txt
+          find build/artifacts -name rom.bin -printf '%p %s bytes\n' | sort | tee build/artifacts/SIZES.txt
+
+      - name: Upload Mega Drive build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega-drive-roms
+          path: build/artifacts/

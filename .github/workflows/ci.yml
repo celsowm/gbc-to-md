@@ -1,0 +1,54 @@
+name: Host CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential binutils curl git python3 ca-certificates \
+            openjdk-17-jre-headless
+
+      - name: Cache downloaded dependency archives
+        uses: actions/cache@v4
+        with:
+          path: .deps/downloads
+          key: gbc-to-md-host-deps-${{ hashFiles('versions.env') }}
+
+      - name: Check tool availability
+        run: make doctor
+
+      - name: Bootstrap GB Recompiled
+        run: make bootstrap
+
+      - name: Run host compatibility suite
+        run: make verify-ci
+
+      - name: Upload host logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-ci-logs
+          path: |
+            build/*.log
+            build/**/*.log
+          if-no-files-found: ignore
