@@ -72,7 +72,7 @@ function render(analysis, file) {
 
   recompile.disabled = moduleInstance === null;
   recompile.title = moduleInstance ? 'Run GB Recompiled locally in WebAssembly.' : 'WebAssembly recompiler is still loading.';
-  buildRom.disabled = generatedFiles.length === 0 || selectedBytes?.length > 0x400000;
+  buildRom.disabled = generatedFiles.length === 0;
 }
 
 function loadClassicScript(src) {
@@ -212,7 +212,7 @@ async function compileSelectedRom() {
     renderGeneratedFiles();
     const preferred = generatedFiles.find((file) => /_funcs_\d+\.c$/.test(file.name)) || generatedFiles.find((file) => file.name.endsWith('.c')) || generatedFiles[0];
     if (preferred) selectGenerated(preferred);
-    buildRom.disabled = selectedBytes.length > 0x400000;
+    buildRom.disabled = false;
   } catch (error) {
     console.error(error);
     generatedFiles = [];
@@ -254,7 +254,7 @@ async function buildSelectedRom() {
     romBuildSummary.textContent = error instanceof Error ? error.message : String(error);
   } finally {
     recompile.disabled = false;
-    buildRom.disabled = !generatedFiles.length || selectedBytes.length > 0x400000;
+    buildRom.disabled = !generatedFiles.length;
   }
 }
 
