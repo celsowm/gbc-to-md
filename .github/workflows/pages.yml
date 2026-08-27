@@ -147,6 +147,7 @@ jobs:
           PY
 
           cp sgdk_runtime/src/gbrt_sgdk_min.c site/runtime/
+          cp sgdk_runtime/src/gbrt_cpu.c site/runtime/
           cp sgdk_runtime/include/gbrt.h site/runtime/
           cp src/gbmd_backend.c src/gbmd_backend.h site/runtime/
           cp sgdk/template/src/main.c site/runtime/main.c
@@ -169,6 +170,7 @@ jobs:
           test -f site/toolchain/share/sgdk/libmd.seed.a
           grep -q '#define ENABLE_BANK_SWITCH      1' site/toolchain/share/sgdk/include/config.h
           test -f site/runtime/gbrt_sgdk_min.c
+          test -f site/runtime/gbrt_cpu.c
           du -sh site site/toolchain/wasm site/toolchain/share
 
       - name: Run real playground end-to-end in Chromium
