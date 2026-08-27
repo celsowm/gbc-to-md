@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Run GB Recompiled locally in your browser and inspect Mega Drive-ready generated C.">
+  <meta name="description" content="Recompile a Game Boy ROM and build a Sega Mega Drive ROM entirely in your browser.">
   <title>gbc-to-md playground</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -15,9 +15,9 @@
     </nav>
 
     <section class="hero">
-      <div class="eyebrow">Static recompilation in your browser</div>
-      <h1>Game Boy → native C</h1>
-      <p>Drop a legally obtained <code>.gb</code> or <code>.gbc</code> ROM. The real <code>gbrecomp_core</code> runs as WebAssembly on your device, generates C in memory, and prepares it for the Mega Drive backend. Nothing is uploaded.</p>
+      <div class="eyebrow">End-to-end static recompilation in your browser</div>
+      <h1>Game Boy → Mega Drive ROM</h1>
+      <p>Drop a legally obtained <code>.gb</code> or <code>.gbc</code> ROM. GB Recompiled generates native C, then WebAssembly builds of <code>m68k-gcc</code>, <code>as</code>, <code>ld</code>, and <code>objcopy</code> produce a downloadable Genesis/Mega Drive cartridge image. Nothing is uploaded.</p>
     </section>
 
     <section class="grid">
@@ -46,8 +46,11 @@
             <dt>Global checksum</dt><dd id="global-checksum"></dd>
           </dl>
           <ul id="warnings" class="warnings"></ul>
-          <div class="actions"><button id="recompile-button" disabled>Recompile to C</button></div>
-          <div class="note">This runs the real upstream recompiler core. Final C → m68k object generation and cartridge linking are separate browser milestones.</div>
+          <div class="actions">
+            <button id="recompile-button" disabled>1. Recompile to C</button>
+            <button id="build-rom-button" disabled>2. Build Mega Drive ROM</button>
+          </div>
+          <div id="build-note" class="note">The recompiler and target toolchain both run locally as WebAssembly. Browser far-ROM builds above 4 MiB remain disabled until mapper-enabled SGDK seed parity is verified.</div>
         </div>
       </aside>
     </section>
@@ -63,7 +66,7 @@
           <div id="generated-files" class="generated-files"></div>
         </div>
         <div class="preview-column">
-          <div class="preview-head"><span id="preview-name">Select a file</span><button id="download-file" class="small" disabled>Download</button></div>
+          <div class="preview-head"><span id="preview-name">Select a file</span><button id="download-file" class="small" disabled>Download source</button></div>
           <pre id="source-preview">The generated C/header/assembly source will appear here.</pre>
         </div>
       </div>
@@ -73,14 +76,23 @@
       </div>
     </section>
 
+    <section id="rom-panel" class="panel rom-panel" hidden>
+      <div>
+        <div class="eyebrow">Mega Drive cartridge</div>
+        <h2 id="rom-build-status">ROM ready</h2>
+        <p id="rom-build-summary"></p>
+      </div>
+      <button id="download-rom-button" disabled>Download rom.bin</button>
+    </section>
+
     <section class="pipeline">
       <div><span>1</span><strong>Header pre-check</strong><small>instant JavaScript</small></div>
       <div><span>2</span><strong>Static recompile</strong><small>gbrecomp_core.wasm</small></div>
-      <div><span>3</span><strong>SGDK preparation</strong><small>target C + ROM blob assembly</small></div>
-      <div class="future"><span>4</span><strong>m68k link</strong><small>browser milestone in progress</small></div>
+      <div><span>3</span><strong>M68k compile</strong><small>m68k-gcc + as WebAssembly</small></div>
+      <div><span>4</span><strong>Link cartridge</strong><small>ld + objcopy + checksum</small></div>
     </section>
 
-    <footer><span>Experimental — successful recompilation does not guarantee whole-game compatibility.</span><span>No ROM data leaves your browser.</span></footer>
+    <footer><span>Experimental — a successful build does not guarantee whole-game compatibility.</span><span>No ROM data leaves your browser.</span></footer>
   </main>
   <script type="module" src="./app.js"></script>
 </body>
