@@ -60,7 +60,10 @@ jobs:
         with:
           node-version: '24'
       - name: Install pinned WebAssembly m68k GCC/binutils package
-        run: npm install --no-save --no-package-lock --ignore-scripts romdev-toolchain-m68k-gcc@0.3.0
+        run: |
+          . ./versions.env
+          npm install --no-save --no-package-lock --ignore-scripts \
+            "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}"
       - name: Build a complete Genesis ROM using only WebAssembly tools
         run: node wasm/romdev-genesis-smoke.mjs build/romdev-wasm-smoke/rom.bin
       - name: Record ROM size and hash
@@ -85,7 +88,10 @@ jobs:
         with:
           node-version: '24'
       - name: Install pinned WebAssembly m68k GCC/binutils package
-        run: npm install --no-save --no-package-lock --ignore-scripts romdev-toolchain-m68k-gcc@0.3.0
+        run: |
+          . ./versions.env
+          npm install --no-save --no-package-lock --ignore-scripts \
+            "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}"
       - name: Download GB Recompiled WebAssembly
         uses: actions/download-artifact@v4
         with:
@@ -110,6 +116,66 @@ jobs:
         with:
           name: gbc-to-md-browser-e2e-rom
           path: build/browser-e2e/rom.bin
+
+  mbc5-far-rom-wasm:
+    needs: recompiler-wasm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned WebAssembly m68k GCC/binutils package
+        run: |
+          . ./versions.env
+          npm install --no-save --no-package-lock --ignore-scripts \
+            "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}"
+      - name: Enable official SEGA mapper in the packaged SGDK tree
+        run: |
+          . ./versions.env
+          CFG="node_modules/${ROMDEV_M68K_WASM_PACKAGE}/share/genesis/lib/sgdk/include/config.h"
+          python3 - "$CFG" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          text = p.read_text()
+          old = '#define ENABLE_BANK_SWITCH      0'
+          new = '#define ENABLE_BANK_SWITCH      1'
+          if old not in text:
+              raise SystemExit('ENABLE_BANK_SWITCH=0 marker not found')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          grep 'ENABLE_BANK_SWITCH' "$CFG"
+      - name: Rebuild matching SGDK seed entirely through WebAssembly tools
+        run: node wasm/rebuild-mapper-sgdk-seed.mjs
+      - name: Download GB Recompiled WebAssembly
+        uses: actions/download-artifact@v4
+        with:
+          name: gbrecomp-wasm-probe
+          path: build/wasm/dist
+      - name: Generate 8 MiB MBC5 stress fixture
+        run: python3 fixtures/make_mbc5test.py
+      - name: Build 8 MiB MBC5 far-ROM cartridge with only WebAssembly toolchains
+        run: |
+          node wasm/gb-to-genesis-rom.mjs \
+            build/wasm/dist/gbrecomp_probe.js \
+            build/wasm/dist/gbrecomp_probe.wasm \
+            fixtures/mbc5test.gb \
+            build/browser-mbc5/rom.bin
+      - name: Validate far-ROM output
+        run: |
+          test -s build/browser-mbc5/rom.bin
+          test "$(wc -c < build/browser-mbc5/rom.bin)" -gt 8388608
+          wc -c build/browser-mbc5/rom.bin
+          sha256sum build/browser-mbc5/rom.bin
+      - name: Upload 8 MiB browser far-ROM proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbc-to-md-browser-mbc5-far-rom
+          path: build/browser-mbc5/rom.bin
 
   native-sgdk-reference:
     needs: recompiler-wasm
