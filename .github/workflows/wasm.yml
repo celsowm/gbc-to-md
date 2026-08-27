@@ -47,6 +47,44 @@ jobs:
             build/wasm/dist/gbrecomp_probe.js
             build/wasm/dist/gbrecomp_probe.wasm
 
+  clang-m68k-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install LLVM WebAssembly build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y emscripten cmake ninja-build git python3 llvm-15-tools
+          node --version
+      - name: Build reduced Clang with only the M68k backend as WebAssembly
+        env:
+          JOBS: '2'
+        run: ./wasm/llvm/build-clang-m68k.sh
+      - name: Compile freestanding C to a Motorola 68000 object in WebAssembly
+        run: |
+          mkdir -p build/clang-m68k-wasm/proof
+          node wasm/llvm/clang-m68k.test.cjs \
+            build/clang-m68k-wasm/dist/clang-m68k.js \
+            build/clang-m68k-wasm/dist/clang-m68k.wasm \
+            wasm/llvm/hello.c \
+            build/clang-m68k-wasm/proof/hello.o
+          llvm-readelf-15 -h build/clang-m68k-wasm/proof/hello.o
+          llvm-objdump-15 -d build/clang-m68k-wasm/proof/hello.o || true
+      - name: Record browser compiler sizes and hashes
+        run: |
+          wc -c build/clang-m68k-wasm/dist/clang-m68k.js build/clang-m68k-wasm/dist/clang-m68k.wasm
+          sha256sum build/clang-m68k-wasm/dist/clang-m68k.js build/clang-m68k-wasm/dist/clang-m68k.wasm
+      - name: Upload browser M68k compiler proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-m68k-wasm
+          path: |
+            build/clang-m68k-wasm/dist/clang-m68k.js
+            build/clang-m68k-wasm/dist/clang-m68k.wasm
+            build/clang-m68k-wasm/proof/hello.o
+
   sgdk-bridge:
     needs: probe
     runs-on: ubuntu-24.04
