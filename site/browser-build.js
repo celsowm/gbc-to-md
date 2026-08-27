@@ -133,14 +133,6 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
   if (!(romBytes instanceof Uint8Array)) throw new TypeError('romBytes must be Uint8Array');
   if (!Array.isArray(generatedFiles) || generatedFiles.length === 0) throw new Error('Recompile the Game Boy ROM before building the Mega Drive ROM');
 
-  // The existing native backend supports larger retained ROMs through the
-  // official SGDK SEGA mapper. The browser package currently links its stock
-  // SGDK seed, so keep the browser release conservative until mapper-enabled
-  // seed parity is proven in CI.
-  if (romBytes.length > 0x400000) {
-    throw new Error('Browser builds above 4 MiB are not enabled yet; use the native SGDK pipeline for far-ROM cartridges.');
-  }
-
   onProgress('Loading browser m68k GCC/binutils and SGDK assets…');
   const [{ buildGenesisC, finalizeGenesisRom }, runtime] = await Promise.all([
     loadToolchain(),
@@ -171,14 +163,17 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
     },
   };
 
-  onProgress(`Compiling ${Object.keys(sources).length} source files for Motorola 68000…`);
+  const cc1Options = ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'];
+  if (romBytes.length > 0x400000) cc1Options.push('-DGBRT_SGDK_USE_FAR_ROM');
+
+  onProgress(`Compiling ${Object.keys(sources).length} source files for Motorola 68000${romBytes.length > 0x400000 ? ' with SEGA far-ROM mapper' : ''}…`);
   const started = performance.now();
   const result = await buildGenesisC({
     sources,
     headers,
     binaryIncludes: { 'browserrom.gb': romBytes },
     sgdk: true,
-    cc1Options: ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'],
+    cc1Options,
     env,
   });
 
