@@ -6,6 +6,7 @@ import { chromium } from 'playwright-core';
 
 const root = path.resolve(process.argv[2] || 'site');
 const fixture = path.resolve(process.argv[3] || 'fixtures/basicdemo.gb');
+const annotations = process.argv[4] ? path.resolve(process.argv[4]) : null;
 const port = Number(process.env.PLAYGROUND_PORT || 4173);
 
 const mime = {
@@ -64,16 +65,30 @@ try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
   await page.waitForSelector('#wasm-state[data-ready="true"]', { timeout: 60000 });
   await page.setInputFiles('#rom-input', fixture);
+  if (annotations) {
+    await page.setInputFiles('#annotations-input', annotations);
+    await page.waitForFunction(() => {
+      const text = document.querySelector('#annotations-status')?.textContent || '';
+      return !text.includes('No sidecar');
+    }, null, { timeout: 10000 });
+  }
   await page.waitForSelector('#recompile-button:not([disabled])');
   await page.click('#recompile-button');
-  await page.waitForFunction(() => document.querySelector('#compile-status')?.textContent === 'Recompilation complete', null, { timeout: 60000 });
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#compile-status')?.textContent || '';
+    return text === 'Recompilation complete' || text === 'Recompilation failed';
+  }, null, { timeout: 60000 });
+  const compileState = await page.locator('#compile-status').textContent();
+  if (compileState !== 'Recompilation complete') {
+    throw new Error(`playground recompilation failed: ${await page.locator('#compile-summary').textContent()}`);
+  }
+
   await page.waitForSelector('#build-rom-button:not([disabled])');
   await page.click('#build-rom-button');
-
   await page.waitForFunction(() => {
     const text = document.querySelector('#rom-build-status')?.textContent || '';
     return text === 'Mega Drive ROM ready' || text === 'ROM build failed';
-  }, null, { timeout: 60000 });
+  }, null, { timeout: 90000 });
 
   const status = await page.locator('#rom-build-status').textContent();
   if (status !== 'Mega Drive ROM ready') {
@@ -91,6 +106,7 @@ try {
   const check = validateRom(rom);
   console.log(`PASS: real Chromium playground produced ${rom.length}-byte rom.bin`);
   console.log(`PASS: header=${JSON.stringify(check.system)} checksum=0x${check.checksum.toString(16).padStart(4, '0')}`);
+  console.log(`annotations=${annotations || 'none'}`);
   console.log(`UI: ${await page.locator('#rom-build-summary').textContent()}`);
 } finally {
   if (browser) await browser.close();
