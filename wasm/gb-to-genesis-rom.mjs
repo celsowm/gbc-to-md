@@ -94,6 +94,7 @@ function makeBuildInputs(generated, rom) {
   }
 
   sources['gbrt_sgdk_min.c'] = fs.readFileSync(path.join(root, 'sgdk_runtime/src/gbrt_sgdk_min.c'), 'utf8');
+  sources['gbrt_cpu.c'] = fs.readFileSync(path.join(root, 'sgdk_runtime/src/gbrt_cpu.c'), 'utf8');
   sources['gbmd_backend.c'] = fs.readFileSync(path.join(root, 'src/gbmd_backend.c'), 'utf8');
   sources['main.c'] = fs.readFileSync(path.join(root, 'sgdk/template/src/main.c'), 'utf8')
     .replaceAll('cakegame', 'browserrom');
@@ -134,7 +135,7 @@ async function main() {
   const generated = await recompile(gbrecompJs, gbrecompWasm, rom, annotations?.text || '');
   const recompileDone = performance.now();
   const inputs = makeBuildInputs(generated, rom);
-  const cc1Options = ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'];
+  const cc1Options = ['-O1', '-DGBRT_SGDK_USE_CART_SRAM'];
   if (rom.length > 0x400000) cc1Options.push('-DGBRT_SGDK_USE_FAR_ROM');
 
   console.log(`GB Recompiled WASM: ${generated.size} prepared artifacts`);
