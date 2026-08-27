@@ -85,6 +85,41 @@ jobs:
             build/clang-m68k-wasm/dist/clang-m68k.wasm
             build/clang-m68k-wasm/proof/hello.o
 
+  generated-c-m68k:
+    needs: [probe, clang-m68k-browser]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Download GB Recompiled WebAssembly
+        uses: actions/download-artifact@v4
+        with:
+          name: gbrecomp-wasm-probe
+          path: build/wasm/dist
+      - name: Download browser M68k Clang
+        uses: actions/download-artifact@v4
+        with:
+          name: clang-m68k-wasm
+          path: build/clang-m68k-wasm/dist
+      - name: Generate browser integration fixture
+        run: python3 fixtures/make_basicdemo.py
+      - name: Compile real GB Recompiled C units to Motorola 68000 objects
+        run: |
+          mkdir -p build/browser-m68k-objects
+          node wasm/llvm/gbrecomp-generated-m68k.test.cjs \
+            build/wasm/dist/gbrecomp_probe.js \
+            build/wasm/dist/gbrecomp_probe.wasm \
+            build/clang-m68k-wasm/dist/clang-m68k.js \
+            build/clang-m68k-wasm/dist/clang-m68k.wasm \
+            fixtures/basicdemo.gb \
+            build/browser-m68k-objects
+          file build/browser-m68k-objects/*.o
+      - name: Upload browser-generated game objects
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbrecomp-m68k-objects
+          path: build/browser-m68k-objects/
+
   sgdk-bridge:
     needs: probe
     runs-on: ubuntu-24.04
