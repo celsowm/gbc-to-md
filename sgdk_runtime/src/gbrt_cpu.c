@@ -1,5 +1,7 @@
 #include "gbrt.h"
 
+bool gbrt_test_breakpoint_enabled = false;
+
 /*
  * LR35902 helpers required by GB Recompiled generated code.
  *
