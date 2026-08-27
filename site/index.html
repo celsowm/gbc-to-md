@@ -25,7 +25,7 @@
         <div>
           <div class="drop-icon">↓</div>
           <h2>Drop a ROM here</h2>
-          <p>or click to choose a <strong>.gb</strong> / <strong>.gbc</strong> file<br>Processed only in this browser</p>
+          <p>or click to choose a <strong>.gb</strong> / <strong>.gbc</strong> file<br>You may also drop a matching <strong>.annotations</strong> sidecar<br>Processed only in this browser</p>
           <input id="rom-input" type="file" accept=".gb,.gbc,application/octet-stream">
         </div>
       </div>
@@ -46,11 +46,16 @@
             <dt>Global checksum</dt><dd id="global-checksum"></dd>
           </dl>
           <ul id="warnings" class="warnings"></ul>
+          <div class="annotations-row">
+            <button id="annotations-button" class="small" type="button">Optional .annotations</button>
+            <span id="annotations-status">No sidecar selected</span>
+            <input id="annotations-input" type="file" accept=".annotations,text/plain">
+          </div>
           <div class="actions">
             <button id="recompile-button" disabled>1. Recompile to C</button>
             <button id="build-rom-button" disabled>2. Build Mega Drive ROM</button>
           </div>
-          <div id="build-note" class="note">The recompiler and target toolchain both run locally as WebAssembly. Browser far-ROM builds above 4 MiB remain disabled until mapper-enabled SGDK seed parity is verified.</div>
+          <div id="build-note" class="note">The recompiler and target toolchain both run locally as WebAssembly. Optional GB Recompiled annotations can provide explicit code/data boundaries for large or analysis-sensitive cartridges.</div>
         </div>
       </aside>
     </section>
