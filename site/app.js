@@ -3,6 +3,9 @@ import { buildMegaDriveRom } from './browser-build.js';
 
 const drop = document.querySelector('#drop-zone');
 const picker = document.querySelector('#rom-input');
+const annotationsPicker = document.querySelector('#annotations-input');
+const annotationsButton = document.querySelector('#annotations-button');
+const annotationsStatus = document.querySelector('#annotations-status');
 const result = document.querySelector('#result');
 const empty = document.querySelector('#empty-state');
 const recompile = document.querySelector('#recompile-button');
@@ -24,6 +27,8 @@ const downloadRom = document.querySelector('#download-rom-button');
 
 let selectedFile = null;
 let selectedBytes = null;
+let selectedAnnotationsFile = null;
+let selectedAnnotationsText = '';
 let moduleInstance = null;
 let generatedFiles = [];
 let selectedGenerated = null;
@@ -165,18 +170,36 @@ async function compileSelectedRom() {
   compileStatus.textContent = 'Recompiling…';
   compileSummary.textContent = '';
   generatedFilesEl.replaceChildren();
-  sourcePreview.textContent = 'Running static analysis and C generation…';
+  sourcePreview.textContent = selectedAnnotationsText
+    ? 'Running reachable-only static analysis with supplied annotations…'
+    : 'Running static analysis and C generation…';
   previewName.textContent = 'Working';
   downloadFile.disabled = true;
   recompile.disabled = true;
   buildRom.disabled = true;
   await new Promise((resolve) => requestAnimationFrame(resolve));
 
-  const ptr = moduleInstance._malloc(selectedBytes.length);
+  const romPtr = moduleInstance._malloc(selectedBytes.length);
+  const annotationsBytes = selectedAnnotationsText ? new TextEncoder().encode(selectedAnnotationsText) : null;
+  const annotationsPtr = annotationsBytes?.length ? moduleInstance._malloc(annotationsBytes.length) : 0;
   const started = performance.now();
   try {
-    moduleInstance.HEAPU8.set(selectedBytes, ptr);
-    const generatedCount = moduleInstance._gbrecomp_wasm_compile(ptr, selectedBytes.length);
+    moduleInstance.HEAPU8.set(selectedBytes, romPtr);
+    let generatedCount;
+    if (annotationsBytes?.length) {
+      if (typeof moduleInstance._gbrecomp_wasm_compile_annotated !== 'function') {
+        throw new Error('This playground build does not expose annotated recompilation yet.');
+      }
+      moduleInstance.HEAPU8.set(annotationsBytes, annotationsPtr);
+      generatedCount = moduleInstance._gbrecomp_wasm_compile_annotated(
+        romPtr,
+        selectedBytes.length,
+        annotationsPtr,
+        annotationsBytes.length,
+      );
+    } else {
+      generatedCount = moduleInstance._gbrecomp_wasm_compile(romPtr, selectedBytes.length);
+    }
     if (generatedCount < 0) throw new Error(readLastError());
     const preparedCount = moduleInstance._gbrecomp_wasm_prepare_sgdk(selectedBytes.length);
     if (preparedCount < 0) throw new Error(readLastError());
@@ -185,7 +208,7 @@ async function compileSelectedRom() {
     const elapsed = performance.now() - started;
     const totalBytes = generatedFiles.reduce((sum, file) => sum + file.bytes, 0);
     compileStatus.textContent = 'Recompilation complete';
-    compileSummary.textContent = `${generatedFiles.length} files · ${totalBytes.toLocaleString()} source bytes · ${elapsed.toFixed(0)} ms`;
+    compileSummary.textContent = `${generatedFiles.length} files · ${totalBytes.toLocaleString()} source bytes · ${elapsed.toFixed(0)} ms${selectedAnnotationsText ? ' · annotated' : ''}`;
     renderGeneratedFiles();
     const preferred = generatedFiles.find((file) => /_funcs_\d+\.c$/.test(file.name)) || generatedFiles.find((file) => file.name.endsWith('.c')) || generatedFiles[0];
     if (preferred) selectGenerated(preferred);
@@ -198,7 +221,8 @@ async function compileSelectedRom() {
     previewName.textContent = 'Error';
     sourcePreview.textContent = error instanceof Error ? error.stack || error.message : String(error);
   } finally {
-    moduleInstance._free(ptr);
+    if (annotationsPtr) moduleInstance._free(annotationsPtr);
+    moduleInstance._free(romPtr);
     recompile.disabled = false;
   }
 }
@@ -234,10 +258,27 @@ async function buildSelectedRom() {
   }
 }
 
-recompile.addEventListener('click', compileSelectedRom);
-buildRom.addEventListener('click', buildSelectedRom);
+async function handleAnnotationFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.annotations')) {
+    alert('Choose a .annotations sidecar file.');
+    return;
+  }
+  selectedAnnotationsFile = file;
+  selectedAnnotationsText = await file.text();
+  annotationsStatus.textContent = `${file.name} · ${selectedAnnotationsText.split(/\r?\n/).filter(Boolean).length.toLocaleString()} lines`;
+  generatedFiles = [];
+  selectedGenerated = null;
+  builtRom = null;
+  buildRom.disabled = true;
+  romPanel.hidden = true;
+  if (!compilerPanel.hidden) {
+    compileStatus.textContent = 'Annotations changed — recompile required';
+    compileSummary.textContent = '';
+  }
+}
 
-async function handleFile(file) {
+async function handleFile(file, { keepAnnotations = false } = {}) {
   if (!file) return;
   const lower = file.name.toLowerCase();
   if (!lower.endsWith('.gb') && !lower.endsWith('.gbc')) {
@@ -248,6 +289,12 @@ async function handleFile(file) {
     const buffer = await file.arrayBuffer();
     selectedFile = file;
     selectedBytes = new Uint8Array(buffer);
+    if (!keepAnnotations) {
+      selectedAnnotationsFile = null;
+      selectedAnnotationsText = '';
+      annotationsStatus.textContent = 'No sidecar selected';
+      annotationsPicker.value = '';
+    }
     generatedFiles = [];
     selectedGenerated = null;
     builtRom = null;
@@ -260,6 +307,22 @@ async function handleFile(file) {
   }
 }
 
+async function handleDroppedFiles(fileList) {
+  const files = [...(fileList || [])];
+  const rom = files.find((file) => /\.(gb|gbc)$/i.test(file.name));
+  const annotations = files.find((file) => /\.annotations$/i.test(file.name));
+  if (!rom) {
+    alert('Drop a .gb or .gbc cartridge image.');
+    return;
+  }
+  await handleFile(rom, { keepAnnotations: Boolean(annotations) });
+  if (annotations) await handleAnnotationFile(annotations);
+}
+
+recompile.addEventListener('click', compileSelectedRom);
+buildRom.addEventListener('click', buildSelectedRom);
+annotationsButton.addEventListener('click', () => annotationsPicker.click());
+annotationsPicker.addEventListener('change', () => handleAnnotationFile(annotationsPicker.files?.[0]));
 picker.addEventListener('change', () => handleFile(picker.files?.[0]));
 drop.addEventListener('click', () => picker.click());
 drop.addEventListener('keydown', (event) => {
@@ -267,6 +330,6 @@ drop.addEventListener('keydown', (event) => {
 });
 for (const name of ['dragenter', 'dragover']) drop.addEventListener(name, (event) => { event.preventDefault(); drop.dataset.dragging = 'true'; });
 for (const name of ['dragleave', 'drop']) drop.addEventListener(name, (event) => { event.preventDefault(); drop.dataset.dragging = 'false'; });
-drop.addEventListener('drop', (event) => handleFile(event.dataTransfer?.files?.[0]));
+drop.addEventListener('drop', (event) => handleDroppedFiles(event.dataTransfer?.files));
 
 loadRecompiler();
