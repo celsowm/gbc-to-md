@@ -191,7 +191,10 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
     },
   };
 
-  const cc1Options = ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'];
+  // Match GB Recompiled's current compact manual-testing profile. Large commercial
+  // ROMs can generate megabytes of C even when the cartridge itself is only 32 KiB;
+  // -O1 keeps m68k code size and linker pressure bounded without disabling optimization.
+  const cc1Options = ['-O1', '-DGBRT_SGDK_USE_CART_SRAM'];
   if (farRom) cc1Options.push('-DGBRT_SGDK_USE_FAR_ROM');
 
   onProgress(`Compiling ${Object.keys(sources).length} source files for Motorola 68000${farRom ? ' with SEGA far-ROM mapper' : ''}…`);
@@ -207,7 +210,12 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
 
   if (!result?.ok || !(result.binary instanceof Uint8Array)) {
     const stage = result?.stage ? ` at ${result.stage}` : '';
-    throw new Error(`Mega Drive build failed${stage}\n${result?.log || ''}`);
+    const fullLog = result?.log || '';
+    const maxErrorLog = 16000;
+    const logTail = fullLog.length > maxErrorLog
+      ? `… ${fullLog.length - maxErrorLog} earlier log characters omitted …\n${fullLog.slice(-maxErrorLog)}`
+      : fullLog;
+    throw new Error(`Mega Drive build failed${stage}\n${logTail}`);
   }
 
   onProgress('Finalizing cartridge padding and checksum…');
