@@ -98,6 +98,7 @@ typedef struct GBContext {
     uint8_t host_vblank_sync;
     uint8_t host_ly_reads;
     uint16_t host_reserved;
+    uint32_t host_guest_cycle_budget;
 #ifdef GBRT_SGDK_PROFILE
     uint64_t total_cycles;
     uint32_t profile_tick_calls;
@@ -134,9 +135,18 @@ static inline void gb_tick(GBContext *ctx, uint32_t cycles) {
 #endif
     if (ctx->ime_pending) { ctx->ime = 1; ctx->ime_pending = 0; }
     /* Host-VBlank mode advances DIV/TIMA from host frame time, not from the
-       small number of guest instructions that remain after PPU waits are
-       collapsed. This keeps timers running while the guest is HALTed. */
-    if (ctx->host_vblank_sync) return;
+       generated instruction stream. A cheap per-frame guest-cycle budget is
+       still required so commercial busy-wait loops yield back to the host even
+       when they do not poll LY or execute HALT. */
+    if (ctx->host_vblank_sync) {
+        if (cycles >= ctx->host_guest_cycle_budget) {
+            ctx->host_guest_cycle_budget = 0u;
+            ctx->stopped = 1u;
+        } else {
+            ctx->host_guest_cycle_budget -= cycles;
+        }
+        return;
+    }
     gbrt_sgdk_tick_slow(ctx, cycles);
 }
 

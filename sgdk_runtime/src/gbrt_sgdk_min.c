@@ -242,11 +242,12 @@ uint8_t gb_read8(GBContext *ctx, uint16_t addr) {
         if (addr == 0xFF07u) return (uint8_t)(0xF8u | (ctx->md ? (ctx->md->io[0x07u] & 0x07u) : 0u));
         if (addr == 0xFF44u) {
             if (ctx->host_vblank_sync) {
-                /* First LY read in a host frame observes VBlank. The next one
-                   observes active display and yields to the Mega Drive VBlank.
-                   This collapses GB busy-wait scanline loops to O(1). */
-                if (ctx->host_ly_reads++ == 0u) {
-                    ctx->ly = 144u;
+                /* Preserve the observable VBlank scanlines instead of jumping
+                   directly from 144 to 0. Commercial games commonly wait for
+                   an exact LY value (Tetris waits for 148 during startup). */
+                const uint8_t read_index = ctx->host_ly_reads++;
+                if (read_index < 10u) {
+                    ctx->ly = (uint8_t)(144u + read_index);
                 } else {
                     ctx->ly = 0u;
                     ctx->stopped = 1u;
@@ -335,6 +336,20 @@ void gb_write8(GBContext *ctx, uint16_t addr, uint8_t value) {
         }
         if (addr == 0xFF07u) {
             if (ctx->md) ctx->md->io[0x07u] = (uint8_t)(value & 0x07u);
+            return;
+        }
+        if (addr == 0xFF46u) {
+            /* OAM DMA is collapsed to an immediate 160-byte transfer. This is
+               sufficient for the canonical HRAM DMA stubs used by commercial
+               DMG games while keeping the target framebuffer-free. */
+            if (ctx->md) {
+                ctx->md->io[0x46u] = value;
+                const uint16_t source = (uint16_t)((uint16_t)value << 8);
+                for (uint16_t i = 0u; i < 160u; ++i) {
+                    gbmd_write8(ctx->md, (uint16_t)(0xFE00u + i),
+                                gb_read8(ctx, (uint16_t)(source + i)));
+                }
+            }
             return;
         }
         if (addr != 0xFF44u) gbmd_write8(ctx->md, addr, value);
@@ -467,6 +482,7 @@ static bool gbrt_sgdk_service_interrupt(GBContext *ctx) {
 void gbrt_sgdk_run_frame(GBContext *ctx, void (*run_generated)(GBContext *)) {
     ctx->stopped = 0;
     ctx->host_ly_reads = 0;
+    ctx->host_guest_cycle_budget = ctx->host_vblank_sync ? 70224u : 0u;
 #ifdef GBRT_SGDK_PROFILE
     ctx->profile_generated_entries++;
 #endif
@@ -510,8 +526,9 @@ void gbrt_sgdk_run_frame(GBContext *ctx, void (*run_generated)(GBContext *)) {
             const uint8_t pending = gbrt_sgdk_pending_interrupts(ctx);
             if (!(ctx->ime && pending)) break;
             if (ctx->halted) ctx->halted = 0;
-            if (!gbrt_sgdk_service_interrupt(ctx)) break;
             ctx->stopped = 0;
+            ctx->host_guest_cycle_budget = 70224u;
+            if (!gbrt_sgdk_service_interrupt(ctx)) break;
             run_generated(ctx);
         }
 
@@ -554,7 +571,35 @@ void gbrt_execute_halt(GBContext *ctx, uint16_t next_pc, uint32_t cycles) {
     gb_tick(ctx, cycles);
 }
 
-bool gbrt_try_execute_hram_stub(GBContext *ctx, uint16_t addr) { (void)ctx;(void)addr;return false; }
+bool gbrt_try_execute_hram_stub(GBContext *ctx, uint16_t addr) {
+    if (!ctx || addr < 0xFF80u || addr > 0xFFF5u) return false;
+    const size_t off = (size_t)(addr - 0xFF80u);
+    if (off + 10u > sizeof(ctx->hram)) return false;
+    const uint8_t *code = &ctx->hram[off];
+
+    /* Canonical DMG OAM-DMA stub copied into HRAM:
+         ld a,source_hi; ldh [FF46],a; ld a,28; dec a; jr nz,-3; ret
+       Tetris and many other cartridges use this exact shape. Recognizing the
+       semantic operation avoids embedding a general RAM-code interpreter. */
+    if (code[0] != 0x3Eu || code[2] != 0xE0u || code[3] != 0x46u ||
+        code[4] != 0x3Eu || code[5] != 0x28u || code[6] != 0x3Du ||
+        code[7] != 0x20u || code[8] != 0xFDu || code[9] != 0xC9u) {
+        return false;
+    }
+
+    ctx->a = code[1];
+    gb_write8(ctx, 0xFF46u, ctx->a);
+    ctx->a = 0u;
+    ctx->f_z = 1u;
+    ctx->f_n = 1u;
+    ctx->f_h = 0u;
+
+    const uint8_t lo = gb_read8(ctx, ctx->sp++);
+    const uint8_t hi = gb_read8(ctx, ctx->sp++);
+    ctx->pc = (uint16_t)(lo | ((uint16_t)hi << 8));
+    gb_tick(ctx, 680u);
+    return true;
+}
 bool gbrt_try_execute_highmem_stub(GBContext *ctx, uint16_t addr) { (void)ctx;(void)addr;return false; }
 bool gbrt_try_execute_ram_stub(GBContext *ctx, uint16_t addr) { (void)ctx;(void)addr;return false; }
 void gbrt_execute_dispatch_fallback(GBContext *ctx, uint16_t bank, uint16_t addr, GBDispatchFallbackReason reason, uint16_t variants) { (void)bank;(void)addr;(void)reason;(void)variants; ctx->fallback_hit=1; ctx->stopped=1; }
