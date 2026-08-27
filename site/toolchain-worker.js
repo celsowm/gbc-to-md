@@ -133,6 +133,13 @@ async function runJob(job) {
   }
   if (capturedExit !== null && exitCode === 0) exitCode = capturedExit;
 
+  // GCC's cc1 Emscripten build can return normally after diagnostics without
+  // propagating a non-zero process status. Never assemble its partial/empty
+  // output and turn the real compile error into misleading linker failures.
+  if (job.tool === 'cc1' && exitCode === 0 && /(?:^|\n).*\b(?:fatal )?error:/m.test(log)) {
+    exitCode = 1;
+  }
+
   const outputs = {};
   for (const file of job.outputFiles || []) {
     try {
