@@ -110,13 +110,19 @@ jobs:
                   changed.append(p.name)
           if not changed:
               raise SystemExit('No Emscripten Node module import found to browserize')
+          offenders = []
+          for p in root.glob('*.mjs'):
+              if p.name == 'node-module-shim.mjs':
+                  continue
+              text = p.read_text(encoding='utf-8')
+              for needle in ('from"module"', "from'module'", 'import("module")', "import('module')",
+                             'from"node:module"', "from'node:module'", 'import("node:module")', "import('node:module')"):
+                  if needle in text:
+                      offenders.append(f'{p.name}: {needle}')
+          if offenders:
+              raise SystemExit('Unpatched Node module specifier remains: ' + ', '.join(offenders))
           print('browserized glue:', ', '.join(changed))
           PY
-
-          if grep -R -E '(["'"'])(node:)?module\1' site/toolchain/wasm/*.mjs | grep -v node-module-shim; then
-            echo 'unpatched Node module specifier remains in browser glue' >&2
-            exit 1
-          fi
 
           cp sgdk_runtime/src/gbrt_sgdk_min.c site/runtime/
           cp sgdk_runtime/include/gbrt.h site/runtime/
