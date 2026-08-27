@@ -47,6 +47,32 @@ jobs:
             build/wasm/dist/gbrecomp_probe.js
             build/wasm/dist/gbrecomp_probe.wasm
 
+  genesis-gcc-wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: /dev/null
+      - name: Install pinned WebAssembly m68k GCC/binutils package
+        run: npm install --no-save --no-package-lock --ignore-scripts romdev-toolchain-m68k-gcc@0.3.0
+      - name: Build a complete Genesis ROM using only WebAssembly tools
+        run: node wasm/romdev-genesis-smoke.mjs build/romdev-wasm-smoke/rom.bin
+      - name: Record ROM size and hash
+        run: |
+          wc -c build/romdev-wasm-smoke/rom.bin
+          sha256sum build/romdev-wasm-smoke/rom.bin
+      - name: Upload WebAssembly-only Genesis ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-wasm-toolchain-rom
+          path: build/romdev-wasm-smoke/rom.bin
+
   clang-m68k-browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
