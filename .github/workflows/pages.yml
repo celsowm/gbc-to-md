@@ -20,7 +20,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -110,7 +110,8 @@ jobs:
 
           # Emscripten's ES-module glue retains a Node `module` import even in
           # browser-capable builds. Bare Node specifiers are illegal in a Web
-          # Worker without an import map, so point them at a local no-op shim.
+          # Worker without an import map, so point them at a local shim while
+          # the Worker supplies wasmBinary and MEMFS explicitly.
           python3 - <<'PY'
           from pathlib import Path
           root = Path('site/toolchain/wasm')
