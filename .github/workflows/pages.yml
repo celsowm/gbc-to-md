@@ -80,11 +80,43 @@ jobs:
           cp -R "$PKG/wasm" site/toolchain/wasm
           cp -R "$PKG/build" site/toolchain/build
           cp -R "$PKG/share/genesis/lib" site/toolchain/share
+          cp site/toolchain-node-module-shim.mjs site/toolchain/wasm/node-module-shim.mjs
           cp "$PKG/package.json" site/toolchain/notices/romdev-toolchain-package.json
           cp "$PKG/README.md" site/toolchain/notices/ROMDEV_TOOLCHAIN_README.md
           find "$PKG" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
             -exec cp {} site/toolchain/notices/ \; || true
           cp THIRD_PARTY.md site/toolchain/notices/GBC_TO_MD_THIRD_PARTY.md
+
+          # Emscripten's ES-module glue retains a Node `module` import even in
+          # browser-capable builds. Bare Node specifiers are illegal in a Web
+          # Worker without an import map, so point them at a local no-op shim.
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('site/toolchain/wasm')
+          changed = []
+          for p in root.glob('*.mjs'):
+              text = p.read_text(encoding='utf-8')
+              patched = (text
+                  .replace('from"module"', 'from"./node-module-shim.mjs"')
+                  .replace("from'module'", "from'./node-module-shim.mjs'")
+                  .replace('import("module")', 'import("./node-module-shim.mjs")')
+                  .replace("import('module')", "import('./node-module-shim.mjs')")
+                  .replace('from"node:module"', 'from"./node-module-shim.mjs"')
+                  .replace("from'node:module'", "from'./node-module-shim.mjs'")
+                  .replace('import("node:module")', 'import("./node-module-shim.mjs")')
+                  .replace("import('node:module')", "import('./node-module-shim.mjs')"))
+              if patched != text:
+                  p.write_text(patched, encoding='utf-8')
+                  changed.append(p.name)
+          if not changed:
+              raise SystemExit('No Emscripten Node module import found to browserize')
+          print('browserized glue:', ', '.join(changed))
+          PY
+
+          if grep -R -E '(["'"'])(node:)?module\1' site/toolchain/wasm/*.mjs | grep -v node-module-shim; then
+            echo 'unpatched Node module specifier remains in browser glue' >&2
+            exit 1
+          fi
 
           cp sgdk_runtime/src/gbrt_sgdk_min.c site/runtime/
           cp sgdk_runtime/include/gbrt.h site/runtime/
