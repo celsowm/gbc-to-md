@@ -8,6 +8,8 @@ const root = path.resolve(process.argv[2] || 'site');
 const fixture = path.resolve(process.argv[3] || 'fixtures/basicdemo.gb');
 const annotations = process.argv[4] ? path.resolve(process.argv[4]) : null;
 const port = Number(process.env.PLAYGROUND_PORT || 4173);
+const fixtureBytes = fs.statSync(fixture).size;
+const buildTimeoutMs = fixtureBytes > 0x400000 ? 240000 : 90000;
 
 const mime = {
   '.html': 'text/html; charset=utf-8',
@@ -88,7 +90,7 @@ try {
   await page.waitForFunction(() => {
     const text = document.querySelector('#rom-build-status')?.textContent || '';
     return text === 'Mega Drive ROM ready' || text === 'ROM build failed';
-  }, null, { timeout: 90000 });
+  }, null, { timeout: buildTimeoutMs });
 
   const status = await page.locator('#rom-build-status').textContent();
   if (status !== 'Mega Drive ROM ready') {
