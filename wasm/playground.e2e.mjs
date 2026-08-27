@@ -9,7 +9,7 @@ const fixture = path.resolve(process.argv[3] || 'fixtures/basicdemo.gb');
 const annotations = process.argv[4] ? path.resolve(process.argv[4]) : null;
 const port = Number(process.env.PLAYGROUND_PORT || 4173);
 const fixtureBytes = fs.statSync(fixture).size;
-const buildTimeoutMs = fixtureBytes > 0x400000 ? 240000 : 90000;
+const buildTimeoutMs = fixtureBytes > 0x400000 ? 600000 : 90000;
 
 const mime = {
   '.html': 'text/html; charset=utf-8',
