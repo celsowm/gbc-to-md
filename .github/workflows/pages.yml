@@ -54,6 +54,27 @@ jobs:
             "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}" \
             playwright-core@1.56.1
 
+      - name: Build mapper-enabled SGDK seed for browser far-ROM
+        run: |
+          . ./versions.env
+          CFG="node_modules/${ROMDEV_M68K_WASM_PACKAGE}/share/genesis/lib/sgdk/include/config.h"
+          python3 - "$CFG" <<'PY'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          text = p.read_text(encoding='utf-8')
+          old = '#define ENABLE_BANK_SWITCH      0'
+          new = '#define ENABLE_BANK_SWITCH      1'
+          if old in text:
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          elif new not in text:
+              raise SystemExit('ENABLE_BANK_SWITCH marker not found')
+          PY
+          node wasm/rebuild-mapper-sgdk-seed.mjs
+          grep -q '#define ENABLE_BANK_SWITCH      1' "$CFG"
+          test -s "node_modules/${ROMDEV_M68K_WASM_PACKAGE}/share/genesis/lib/sgdk/libmd.seed.a"
+          test -s "node_modules/${ROMDEV_M68K_WASM_PACKAGE}/share/genesis/lib/sgdk/libmd.seed.hash"
+
       - name: Prove end-to-end WebAssembly build before packaging
         run: |
           node wasm/gb-to-genesis-rom.mjs \
@@ -145,6 +166,7 @@ jobs:
           test -f site/toolchain/wasm/m68k-elf-ld.mjs
           test -f site/toolchain/wasm/m68k-elf-objcopy.mjs
           test -f site/toolchain/share/sgdk/libmd.seed.a
+          grep -q '#define ENABLE_BANK_SWITCH      1' site/toolchain/share/sgdk/include/config.h
           test -f site/runtime/gbrt_sgdk_min.c
           du -sh site site/toolchain/wasm site/toolchain/share
 
