@@ -69,7 +69,17 @@ try {
   await page.waitForFunction(() => document.querySelector('#compile-status')?.textContent === 'Recompilation complete', null, { timeout: 60000 });
   await page.waitForSelector('#build-rom-button:not([disabled])');
   await page.click('#build-rom-button');
-  await page.waitForFunction(() => document.querySelector('#rom-build-status')?.textContent === 'Mega Drive ROM ready', null, { timeout: 180000 });
+
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#rom-build-status')?.textContent || '';
+    return text === 'Mega Drive ROM ready' || text === 'ROM build failed';
+  }, null, { timeout: 60000 });
+
+  const status = await page.locator('#rom-build-status').textContent();
+  if (status !== 'Mega Drive ROM ready') {
+    const summary = await page.locator('#rom-build-summary').textContent();
+    throw new Error(`playground ROM build failed: ${summary}`);
+  }
   await page.waitForSelector('#download-rom-button:not([disabled])');
 
   const [download] = await Promise.all([
