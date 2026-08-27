@@ -132,14 +132,15 @@ async function loadGlue(file) {
 }
 
 async function loadRuntimeBundle() {
-  const [gbrtC, gbrtH, backendC, backendH, mainTemplate] = await Promise.all([
+  const [gbrtC, cpuC, gbrtH, backendC, backendH, mainTemplate] = await Promise.all([
     fetchText('./runtime/gbrt_sgdk_min.c'),
+    fetchText('./runtime/gbrt_cpu.c'),
     fetchText('./runtime/gbrt.h'),
     fetchText('./runtime/gbmd_backend.c'),
     fetchText('./runtime/gbmd_backend.h'),
     fetchText('./runtime/main.c'),
   ]);
-  return { gbrtC, gbrtH, backendC, backendH, mainTemplate };
+  return { gbrtC, cpuC, gbrtH, backendC, backendH, mainTemplate };
 }
 
 function validateGenesisRom(rom) {
@@ -173,6 +174,7 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
     else if (/\.h$/i.test(file.name)) headers[file.name] = file.content;
   }
   sources['gbrt_sgdk_min.c'] = runtime.gbrtC;
+  sources['gbrt_cpu.c'] = runtime.cpuC;
   sources['gbmd_backend.c'] = runtime.backendC;
   sources['main.c'] = runtime.mainTemplate.replaceAll('cakegame', 'browserrom');
   headers['gbrt.h'] = runtime.gbrtH;
@@ -212,10 +214,12 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
     const stage = result?.stage ? ` at ${result.stage}` : '';
     const fullLog = result?.log || '';
     const maxErrorLog = 16000;
-    const logTail = fullLog.length > maxErrorLog
-      ? `… ${fullLog.length - maxErrorLog} earlier log characters omitted …\n${fullLog.slice(-maxErrorLog)}`
-      : fullLog;
-    throw new Error(`Mega Drive build failed${stage}\n${logTail}`);
+    let visibleLog = fullLog;
+    if (fullLog.length > maxErrorLog) {
+      const edge = Math.floor(maxErrorLog / 2);
+      visibleLog = `${fullLog.slice(0, edge)}\n… ${fullLog.length - (edge * 2)} middle log characters omitted …\n${fullLog.slice(-edge)}`;
+    }
+    throw new Error(`Mega Drive build failed${stage}\n${visibleLog}`);
   }
 
   onProgress('Finalizing cartridge padding and checksum…');
