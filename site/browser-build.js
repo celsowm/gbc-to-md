@@ -3,6 +3,8 @@ let shareIndexPromise = null;
 const fetchCache = new Map();
 const sdkCache = new Map();
 let nextJobId = 1;
+let toolWorker = null;
+const pendingToolJobs = new Map();
 
 async function loadToolchain() {
   if (!toolchainPromise) {
@@ -76,27 +78,51 @@ async function hashSources(sourceMap) {
   return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function rejectPendingToolJobs(error) {
+  for (const { reject, timer } of pendingToolJobs.values()) {
+    clearTimeout(timer);
+    reject(error);
+  }
+  pendingToolJobs.clear();
+}
+
+function resetToolWorker(error = null) {
+  if (toolWorker) toolWorker.terminate();
+  toolWorker = null;
+  if (error) rejectPendingToolJobs(error);
+}
+
+function getToolWorker() {
+  if (toolWorker) return toolWorker;
+
+  const worker = new Worker(new URL('./toolchain-worker.js', import.meta.url), { type: 'module' });
+  worker.onmessage = (event) => {
+    const id = event.data?.id;
+    if (!pendingToolJobs.has(id)) return;
+    const pending = pendingToolJobs.get(id);
+    pendingToolJobs.delete(id);
+    clearTimeout(pending.timer);
+    if (event.data.error) pending.reject(new Error(event.data.error));
+    else pending.resolve(event.data.result);
+  };
+  worker.onerror = (event) => {
+    const error = new Error(event.message || 'Browser toolchain worker failed');
+    if (toolWorker === worker) resetToolWorker(error);
+  };
+  toolWorker = worker;
+  return worker;
+}
+
 function runTool(job) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./toolchain-worker.js', import.meta.url), { type: 'module' });
     const id = nextJobId++;
+    const worker = getToolWorker();
     const timer = setTimeout(() => {
-      worker.terminate();
+      pendingToolJobs.delete(id);
       reject(new Error(`Timed out running browser tool ${job.tool}`));
+      resetToolWorker();
     }, 120000);
-
-    worker.onmessage = (event) => {
-      if (event.data?.id !== id) return;
-      clearTimeout(timer);
-      worker.terminate();
-      if (event.data.error) reject(new Error(event.data.error));
-      else resolve(event.data.result);
-    };
-    worker.onerror = (event) => {
-      clearTimeout(timer);
-      worker.terminate();
-      reject(new Error(event.message || `Worker failed while running ${job.tool}`));
-    };
+    pendingToolJobs.set(id, { resolve, reject, timer });
     worker.postMessage({ id, job });
   });
 }
