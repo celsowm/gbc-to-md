@@ -1,5 +1,6 @@
 const factoryCache = new Map();
-const wasmCache = new Map();
+const wasmBinaryCache = new Map();
+const wasmModuleCache = new Map();
 
 function ensureBrowserProcess() {
   if (globalThis.process) return;
@@ -67,29 +68,38 @@ async function loadTool(glueFile) {
     const glueUrl = new URL(`./toolchain/wasm/${glueFile}`, import.meta.url);
     factoryCache.set(glueFile, import(glueUrl.href).then((module) => module.default));
   }
-  if (!wasmCache.has(glueFile)) {
+  if (!wasmBinaryCache.has(glueFile)) {
     const wasmName = glueFile.replace(/\.mjs$/i, '.wasm');
     const wasmUrl = new URL(`./toolchain/wasm/${wasmName}`, import.meta.url);
-    wasmCache.set(glueFile, fetch(wasmUrl).then(async (response) => {
+    wasmBinaryCache.set(glueFile, fetch(wasmUrl).then(async (response) => {
       if (!response.ok) throw new Error(`Failed to fetch ${wasmName}: HTTP ${response.status}`);
       return new Uint8Array(await response.arrayBuffer());
     }));
   }
-  const [factory, wasmBinary] = await Promise.all([
+  if (!wasmModuleCache.has(glueFile)) {
+    wasmModuleCache.set(glueFile, wasmBinaryCache.get(glueFile).then((bytes) => WebAssembly.compile(bytes)));
+  }
+  const [factory, wasmBinary, compiledModule] = await Promise.all([
     factoryCache.get(glueFile),
-    wasmCache.get(glueFile),
+    wasmBinaryCache.get(glueFile),
+    wasmModuleCache.get(glueFile),
   ]);
-  return { factory, wasmBinary };
+  return { factory, wasmBinary, compiledModule };
 }
 
 async function runJob(job) {
-  const { factory, wasmBinary } = await loadTool(job.glueFile);
+  const { factory, wasmBinary, compiledModule } = await loadTool(job.glueFile);
   let log = '';
   let capturedExit = null;
   const print = (msg) => { log += `${msg}\n`; };
 
   const mod = await factory({
     wasmBinary,
+    instantiateWasm(imports, receiveInstance) {
+      const instance = new WebAssembly.Instance(compiledModule, imports);
+      receiveInstance(instance, compiledModule);
+      return instance.exports;
+    },
     noInitialRun: true,
     print,
     printErr: print,
