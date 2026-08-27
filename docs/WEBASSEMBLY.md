@@ -23,6 +23,8 @@ ROM bytes
 
 The generated files are exposed directly through the WebAssembly API; no temporary host filesystem is needed for the ROM-to-C exchange.
 
+The WebAssembly adapter also accepts optional GB Recompiled annotations entirely in memory. `function`, `label`, and `data` annotations can provide explicit entry points/code-data boundaries and switch analysis to the conservative reachable-only path used by the large mapper stress fixtures.
+
 ### W1.5 — prepare generated sources for SGDK in memory
 
 The adapter mirrors the native SGDK preparation:
@@ -37,9 +39,7 @@ The caller retains the uploaded ROM bytes and provides them to the target assemb
 
 ### W2 — C to Motorola 68000 using WebAssembly tools
 
-Proven in Browser toolchain run `33028822471`.
-
-The main path now uses the pinned `romdev-toolchain-m68k-gcc@0.3.0` package rather than depending on the experimental LLVM path. It provides WebAssembly builds of:
+The main path uses the pinned `romdev-toolchain-m68k-gcc@0.3.0` package. It provides WebAssembly builds of:
 
 - GCC `cc1` targeting Motorola 68000;
 - `m68k-elf-as`;
@@ -47,20 +47,16 @@ The main path now uses the pinned `romdev-toolchain-m68k-gcc@0.3.0` package rath
 - `m68k-elf-objcopy`;
 - Genesis/SGDK build glue and the required target share tree.
 
-A standalone all-WASM SGDK smoke test generated a 524,288-byte Genesis ROM with a valid `SEGA MEGA DRIVE` header and checksum `0x3e95`.
-
 The LLVM/Clang M68k experiments remain under `wasm/llvm/` as research, but they are no longer a dependency of the browser conversion path.
 
 ### W3 — GB ROM through both WebAssembly toolchains to `rom.bin`
 
-Also proven in run `33028822471`.
-
-The `basicdemo.gb` synthetic fixture completed this pipeline without a native m68k cross-compiler:
+The `basicdemo.gb` synthetic fixture completes this pipeline without a native m68k cross-compiler:
 
 ```text
 basicdemo.gb
   -> gbrecomp.wasm
-  -> 8 SGDK-prepared generated artifacts
+  -> SGDK-prepared generated artifacts
   -> generated C + GBRT-SGDK + GBMDBackend + SGDK main glue
   -> m68k-gcc.wasm
   -> m68k-elf-as.wasm
@@ -70,36 +66,67 @@ basicdemo.gb
   -> rom.bin
 ```
 
-Measured on that GitHub Actions runner:
+With the mapper-enabled SGDK seed used by the current Pages build, the basic fixture produces:
 
 - input Game Boy ROM: 32,768 bytes;
-- GB Recompiled stage: 93 ms;
-- m68k compile + assembly + link + finalization: 6,771 ms;
-- total: 6,864 ms;
 - output Mega Drive ROM: 524,288 bytes;
-- stored/verified Genesis checksum: `0x185c`;
-- output SHA-256: `b7465a7125276c1a153518096ff643af3f1f1f155aa5cb26764c4efaeb6f5d1b`.
+- header prefix: `SEGA SSF`;
+- stored/verified Genesis checksum: `0x185c`.
 
-The CI artifact for that proof is named `gbc-to-md-browser-e2e-rom`.
+### W3.5 — 8 MiB MBC5 / far-ROM through the WebAssembly target toolchain
 
-## Current milestone
+Proven by Browser toolchain run `33031532872`.
 
-### W4 — run the same target toolchain from the actual playground
+The Pages/toolchain path rebuilds SGDK with `ENABLE_BANK_SWITCH=1`, persists the matching `libmd.seed.a` and source hash, and enables `GBRT_SGDK_USE_FAR_ROM` for retained guest ROMs above 4 MiB.
 
-The repository now contains the browser host layer:
+The annotated MBC5 stress fixture proves:
 
-- `site/browser-build.js` — connects prepared GB Recompiled files to the Genesis build driver;
-- `site/toolchain-worker.js` — instantiates each GCC/binutils WebAssembly tool in a Web Worker and mounts its virtual files;
-- the playground exposes **Build Mega Drive ROM** and downloads the finalized `rom.bin`;
-- the Pages build stages the pinned toolchain WebAssembly files, build modules, SGDK share tree, runtime/backend source, share manifest, and third-party notices.
+- input GB ROM: 8,388,608 bytes / 512 banks;
+- all 511 switchable executable banks represented;
+- official SGDK/SEGA far-ROM mapper path enabled;
+- C compilation, assembly, link, and objcopy performed through WebAssembly tools;
+- output Mega Drive ROM: 8,912,896 bytes;
+- header prefix: `SEGA SSF`;
+- checksum: `0xbce4`;
+- SHA-256: `e8a31e8a301091c987db1811b16794352439b499c587e588cb9865a093305527`;
+- measured total on that Actions runner: about 16.3 seconds.
 
-The Pages packaging workflow executes the end-to-end GB-to-Genesis proof before it uploads the site artifact. The remaining deployment issue is repository-level GitHub Pages enablement: the default Actions token can build/upload the artifact but cannot create a previously disabled Pages site through `actions/configure-pages`.
+This also demonstrates why annotations are first-class: explicit bank entry points prevented the analyzer from treating an immediate/data byte at `18:4001` as a separate function.
 
-## Current browser boundary
+### W4 — actual Chromium playground produces a cartridge
 
-The browser release intentionally rejects retained guest ROMs larger than 4 MiB for now. The native SGDK backend already supports larger ROMs with the official SEGA mapper, but the browser path currently uses the stock SGDK seed bundled with the WebAssembly toolchain. Mapper-enabled seed/config parity must be proven before enabling browser far-ROM output.
+Proven in real Google Chrome 151 by the Pages E2E harness.
 
-This is a packaging/configuration boundary, not a limitation of GB Recompiled or the m68k WebAssembly compiler itself.
+The test opens the packaged `site/`, selects `basicdemo.gb`, clicks **Recompile to C**, clicks **Build Mega Drive ROM**, downloads the result, then independently checks the SEGA header and checksum.
+
+Observed result:
+
+- downloaded ROM: 524,288 bytes;
+- header: `SEGA SSF`;
+- checksum: `0x185c`;
+- browser UI build time: about 10.19 seconds.
+
+This is not a Node simulation of the UI path: the real page, Web Worker host, MEMFS, compiler/linker WebAssembly modules, finalizer, and browser download are exercised by Chromium.
+
+## Current optimization / validation gate
+
+The same real-Chromium test is also exercised with the 8 MiB MBC5 fixture and its `.annotations` sidecar. Correctness is already proven by the all-WebAssembly Node host, but the first browser attempt exceeded a 90-second UI-test timeout because the page created a fresh Worker and repeatedly reloaded/compiled the GCC WebAssembly module for each generated C translation unit.
+
+The browser host now uses a persistent toolchain Worker and caches each compiled `WebAssembly.Module`, while still instantiating a fresh Emscripten runtime per compiler invocation (`EXIT_RUNTIME=1`). This removes repeated WASM compilation from multi-file builds. The large Chromium gate remains the final browser performance/packaging validation before the Pages artifact is deployed.
+
+## Playground packaging
+
+The Pages artifact contains:
+
+- `gbrecomp_core.wasm` adapter;
+- m68k GCC/binutils WebAssembly modules;
+- browser host/Worker glue;
+- mapper-enabled SGDK source tree and matching persisted seed;
+- GBRT-SGDK + GBMDBackend sources;
+- SGDK share manifest;
+- third-party provenance/license notices.
+
+The playground accepts `.gb` / `.gbc` directly and an optional `.annotations` sidecar. Both remain local to browser memory.
 
 ## Constraints
 
