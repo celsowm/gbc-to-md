@@ -5,9 +5,7 @@ on:
     branches: [main]
     paths:
       - 'site/**'
-      - 'wasm/probe.cpp'
-      - 'wasm/compiler.cpp'
-      - 'wasm/build-gbrecomp-probe.sh'
+      - 'wasm/**'
       - 'sgdk_runtime/**'
       - 'src/**'
       - 'sgdk/template/**'
@@ -49,11 +47,12 @@ jobs:
           python3 fixtures/make_basicdemo.py
           node wasm/compiler.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb
 
-      - name: Install pinned browser m68k GCC/binutils toolchain
+      - name: Install pinned browser m68k GCC/binutils toolchain and browser test harness
         run: |
           . ./versions.env
           npm install --no-save --no-package-lock --ignore-scripts \
-            "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}"
+            "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}" \
+            playwright-core@1.56.1
 
       - name: Prove end-to-end WebAssembly build before packaging
         run: |
@@ -110,6 +109,12 @@ jobs:
           test -f site/toolchain/share/sgdk/libmd.seed.a
           test -f site/runtime/gbrt_sgdk_min.c
           du -sh site site/toolchain/wasm site/toolchain/share
+
+      - name: Run real playground end-to-end in Chromium
+        run: |
+          test -x /usr/bin/google-chrome
+          /usr/bin/google-chrome --version
+          node wasm/playground.e2e.mjs site fixtures/basicdemo.gb
 
       - name: Upload packaged playground for inspection
         uses: actions/upload-artifact@v4
