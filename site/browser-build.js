@@ -113,15 +113,15 @@ function getToolWorker() {
   return worker;
 }
 
-function runTool(job) {
+function runTool(job, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     const id = nextJobId++;
     const worker = getToolWorker();
     const timer = setTimeout(() => {
       pendingToolJobs.delete(id);
-      reject(new Error(`Timed out running browser tool ${job.tool}`));
+      reject(new Error(`Timed out running browser tool ${job.tool} after ${timeoutMs} ms`));
       resetToolWorker();
-    }, 120000);
+    }, timeoutMs);
     pendingToolJobs.set(id, { resolve, reject, timer });
     worker.postMessage({ id, job });
   });
@@ -178,8 +178,10 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
   headers['gbrt.h'] = runtime.gbrtH;
   headers['gbmd_backend.h'] = runtime.backendH;
 
+  const farRom = romBytes.length > 0x400000;
+  const toolTimeoutMs = farRom ? 300000 : 120000;
   const env = {
-    runTool,
+    runTool: (job) => runTool(job, toolTimeoutMs),
     loadGlue,
     share: makeShare(),
     hash: hashSources,
@@ -190,9 +192,9 @@ export async function buildMegaDriveRom({ romBytes, generatedFiles, onProgress =
   };
 
   const cc1Options = ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'];
-  if (romBytes.length > 0x400000) cc1Options.push('-DGBRT_SGDK_USE_FAR_ROM');
+  if (farRom) cc1Options.push('-DGBRT_SGDK_USE_FAR_ROM');
 
-  onProgress(`Compiling ${Object.keys(sources).length} source files for Motorola 68000${romBytes.length > 0x400000 ? ' with SEGA far-ROM mapper' : ''}…`);
+  onProgress(`Compiling ${Object.keys(sources).length} source files for Motorola 68000${farRom ? ' with SEGA far-ROM mapper' : ''}…`);
   const started = performance.now();
   const result = await buildGenesisC({
     sources,
