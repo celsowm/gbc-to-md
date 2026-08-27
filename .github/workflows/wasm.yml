@@ -1,4 +1,4 @@
-name: WASM probe
+name: Browser toolchain
 
 on:
   push:
@@ -7,6 +7,9 @@ on:
       - 'wasm/**'
       - 'versions.env'
       - 'scripts/build-wasm-sgdk-bridge.sh'
+      - 'sgdk_runtime/**'
+      - 'src/**'
+      - 'sgdk/template/**'
       - '.github/workflows/wasm.yml'
   workflow_dispatch:
 
@@ -14,7 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  recompiler-wasm:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
@@ -29,17 +32,16 @@ jobs:
           python3 fixtures/make_mbc1test.py
       - name: Build pinned GB Recompiled core as WebAssembly
         run: ./wasm/build-gbrecomp-probe.sh
-      - name: Exercise the WebAssembly probe
+      - name: Exercise the WebAssembly recompiler
         run: |
           node wasm/probe.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb 2 0
           node wasm/probe.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/mbc1test.gb 4 3
-      - name: Generate and prepare SGDK C in memory through WebAssembly
-        run: node wasm/compiler.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb
+          node wasm/compiler.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb
       - name: Record sizes and hashes
         run: |
           wc -c build/wasm/dist/gbrecomp_probe.js build/wasm/dist/gbrecomp_probe.wasm
           sha256sum build/wasm/dist/gbrecomp_probe.js build/wasm/dist/gbrecomp_probe.wasm
-      - name: Upload WebAssembly proof artifact
+      - name: Upload WebAssembly recompiler
         uses: actions/upload-artifact@v4
         with:
           name: gbrecomp-wasm-probe
@@ -57,8 +59,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: /dev/null
       - name: Install pinned WebAssembly m68k GCC/binutils package
         run: npm install --no-save --no-package-lock --ignore-scripts romdev-toolchain-m68k-gcc@0.3.0
       - name: Build a complete Genesis ROM using only WebAssembly tools
@@ -73,81 +73,46 @@ jobs:
           name: genesis-wasm-toolchain-rom
           path: build/romdev-wasm-smoke/rom.bin
 
-  clang-m68k-browser:
+  gb-to-genesis-wasm:
+    needs: [recompiler-wasm, genesis-gcc-wasm]
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-      - name: Install LLVM WebAssembly build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y emscripten cmake ninja-build git python3 llvm-15-tools
-          node --version
-      - name: Build reduced Clang with only the M68k backend as WebAssembly
-        env:
-          JOBS: '2'
-        run: ./wasm/llvm/build-clang-m68k.sh
-      - name: Compile freestanding C to a Motorola 68000 object in WebAssembly
-        run: |
-          mkdir -p build/clang-m68k-wasm/proof
-          node wasm/llvm/clang-m68k.test.cjs \
-            build/clang-m68k-wasm/dist/clang-m68k.js \
-            build/clang-m68k-wasm/dist/clang-m68k.wasm \
-            wasm/llvm/hello.c \
-            build/clang-m68k-wasm/proof/hello.o
-          llvm-readelf-15 -h build/clang-m68k-wasm/proof/hello.o
-          llvm-objdump-15 -d build/clang-m68k-wasm/proof/hello.o || true
-      - name: Record browser compiler sizes and hashes
-        run: |
-          wc -c build/clang-m68k-wasm/dist/clang-m68k.js build/clang-m68k-wasm/dist/clang-m68k.wasm
-          sha256sum build/clang-m68k-wasm/dist/clang-m68k.js build/clang-m68k-wasm/dist/clang-m68k.wasm
-      - name: Upload browser M68k compiler proof
-        uses: actions/upload-artifact@v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
         with:
-          name: clang-m68k-wasm
-          path: |
-            build/clang-m68k-wasm/dist/clang-m68k.js
-            build/clang-m68k-wasm/dist/clang-m68k.wasm
-            build/clang-m68k-wasm/proof/hello.o
-
-  generated-c-m68k:
-    needs: [probe, clang-m68k-browser]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+          node-version: '24'
+      - name: Install pinned WebAssembly m68k GCC/binutils package
+        run: npm install --no-save --no-package-lock --ignore-scripts romdev-toolchain-m68k-gcc@0.3.0
       - name: Download GB Recompiled WebAssembly
         uses: actions/download-artifact@v4
         with:
           name: gbrecomp-wasm-probe
           path: build/wasm/dist
-      - name: Download browser M68k Clang
-        uses: actions/download-artifact@v4
-        with:
-          name: clang-m68k-wasm
-          path: build/clang-m68k-wasm/dist
-      - name: Generate browser integration fixture
+      - name: Generate browser end-to-end fixture
         run: python3 fixtures/make_basicdemo.py
-      - name: Compile real GB Recompiled C units to Motorola 68000 objects
+      - name: Recompile Game Boy ROM and build Genesis ROM using only WebAssembly toolchains
         run: |
-          mkdir -p build/browser-m68k-objects
-          node wasm/llvm/gbrecomp-generated-m68k.test.cjs \
+          node wasm/gb-to-genesis-rom.mjs \
             build/wasm/dist/gbrecomp_probe.js \
             build/wasm/dist/gbrecomp_probe.wasm \
-            build/clang-m68k-wasm/dist/clang-m68k.js \
-            build/clang-m68k-wasm/dist/clang-m68k.wasm \
             fixtures/basicdemo.gb \
-            build/browser-m68k-objects
-          file build/browser-m68k-objects/*.o
-      - name: Upload browser-generated game objects
+            build/browser-e2e/rom.bin
+      - name: Validate end-to-end ROM artifact
+        run: |
+          test -s build/browser-e2e/rom.bin
+          wc -c build/browser-e2e/rom.bin
+          sha256sum build/browser-e2e/rom.bin
+      - name: Upload browser end-to-end Mega Drive ROM
         uses: actions/upload-artifact@v4
         with:
-          name: gbrecomp-m68k-objects
-          path: build/browser-m68k-objects/
+          name: gbc-to-md-browser-e2e-rom
+          path: build/browser-e2e/rom.bin
 
-  sgdk-bridge:
-    needs: probe
+  native-sgdk-reference:
+    needs: recompiler-wasm
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
@@ -164,18 +129,18 @@ jobs:
         with:
           path: .deps/downloads
           key: gbc-to-md-sgdk-deps-${{ hashFiles('versions.env') }}
-      - name: Bootstrap SGDK and m68k toolchain
+      - name: Bootstrap SGDK and native m68k toolchain
         run: make bootstrap-sgdk
-      - name: Generate bridge fixture
+      - name: Generate reference fixture
         run: python3 fixtures/make_basicdemo.py
-      - name: Download WebAssembly artifact from probe job
+      - name: Download WebAssembly recompiler artifact
         uses: actions/download-artifact@v4
         with:
           name: gbrecomp-wasm-probe
           path: build/wasm/dist
-      - name: Link WASM-generated sources with the real SGDK toolchain
+      - name: Link WASM-generated sources with native SGDK toolchain
         run: ./scripts/build-wasm-sgdk-bridge.sh
-      - name: Upload bridge Mega Drive ROM
+      - name: Upload native reference ROM
         uses: actions/upload-artifact@v4
         with:
           name: wasm-sgdk-bridge-rom
