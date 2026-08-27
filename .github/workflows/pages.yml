@@ -8,6 +8,9 @@ on:
       - 'wasm/probe.cpp'
       - 'wasm/compiler.cpp'
       - 'wasm/build-gbrecomp-probe.sh'
+      - 'sgdk_runtime/**'
+      - 'src/**'
+      - 'sgdk/template/**'
       - 'versions.env'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -22,14 +25,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
       - name: Install WebAssembly build dependencies
         run: |
@@ -44,24 +49,90 @@ jobs:
           python3 fixtures/make_basicdemo.py
           node wasm/compiler.test.cjs build/wasm/dist/gbrecomp_probe.js fixtures/basicdemo.gb
 
-      - name: Stage WebAssembly runtime into site
+      - name: Install pinned browser m68k GCC/binutils toolchain
         run: |
-          mkdir -p site/wasm
+          . ./versions.env
+          npm install --no-save --no-package-lock --ignore-scripts \
+            "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}"
+
+      - name: Prove end-to-end WebAssembly build before packaging
+        run: |
+          node wasm/gb-to-genesis-rom.mjs \
+            build/wasm/dist/gbrecomp_probe.js \
+            build/wasm/dist/gbrecomp_probe.wasm \
+            fixtures/basicdemo.gb \
+            build/pages-e2e/rom.bin
+          test -s build/pages-e2e/rom.bin
+          sha256sum build/pages-e2e/rom.bin
+
+      - name: Stage recompiler and target toolchain into site
+        run: |
+          . ./versions.env
+          PKG="node_modules/${ROMDEV_M68K_WASM_PACKAGE}"
+          test -d "$PKG/wasm"
+          test -d "$PKG/build"
+          test -d "$PKG/share/genesis/lib"
+
+          rm -rf site/wasm site/toolchain site/runtime
+          mkdir -p site/wasm site/toolchain site/runtime site/toolchain/notices
+
           cp build/wasm/dist/gbrecomp_probe.js site/wasm/
           cp build/wasm/dist/gbrecomp_probe.wasm site/wasm/
+          cp -R "$PKG/wasm" site/toolchain/wasm
+          cp -R "$PKG/build" site/toolchain/build
+          cp -R "$PKG/share/genesis/lib" site/toolchain/share
+          cp "$PKG/package.json" site/toolchain/notices/romdev-toolchain-package.json
+          cp "$PKG/README.md" site/toolchain/notices/ROMDEV_TOOLCHAIN_README.md
+          find "$PKG" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
+            -exec cp {} site/toolchain/notices/ \; || true
+          cp THIRD_PARTY.md site/toolchain/notices/GBC_TO_MD_THIRD_PARTY.md
+
+          cp sgdk_runtime/src/gbrt_sgdk_min.c site/runtime/
+          cp sgdk_runtime/include/gbrt.h site/runtime/
+          cp src/gbmd_backend.c src/gbmd_backend.h site/runtime/
+          cp sgdk/template/src/main.c site/runtime/main.c
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('site/toolchain/share')
+          paths = sorted(p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file())
+          Path('site/toolchain/share-manifest.json').write_text(json.dumps(paths, separators=(',', ':')), encoding='utf-8')
+          print(f'share manifest: {len(paths)} files')
+          PY
+
           touch site/.nojekyll
-          ls -lh site/wasm/
+          test -f site/toolchain/wasm/cc1-m68k.mjs
+          test -f site/toolchain/wasm/cc1-m68k.wasm
+          test -f site/toolchain/wasm/m68k-elf-as.mjs
+          test -f site/toolchain/wasm/m68k-elf-ld.mjs
+          test -f site/toolchain/wasm/m68k-elf-objcopy.mjs
+          test -f site/toolchain/share/sgdk/libmd.seed.a
+          test -f site/runtime/gbrt_sgdk_min.c
+          du -sh site site/toolchain/wasm site/toolchain/share
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+      - name: Upload packaged playground for inspection
+        uses: actions/upload-artifact@v4
         with:
-          enablement: true
+          name: gbc-to-md-playground-site
+          path: site/
 
-      - name: Upload playground
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
 
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@v4
