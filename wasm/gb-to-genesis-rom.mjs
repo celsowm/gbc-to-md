@@ -29,17 +29,47 @@ function lastError(mod) {
   return decodeBytes(mod, mod._gbrecomp_wasm_error_ptr(), mod._gbrecomp_wasm_error_size()) || 'unknown GB Recompiled error';
 }
 
-async function recompile(gbrecompJs, gbrecompWasm, rom) {
+function findAnnotations(romPath) {
+  const parsed = path.parse(romPath);
+  const candidates = [
+    path.join(parsed.dir, `${parsed.name}.annotations`),
+    `${romPath}.annotations`,
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return { path: candidate, text: fs.readFileSync(candidate, 'utf8') };
+    }
+  }
+  return null;
+}
+
+async function recompile(gbrecompJs, gbrecompWasm, rom, annotationsText = '') {
   const factory = require(path.resolve(gbrecompJs));
   const mod = await factory({
     wasmBinary: fs.readFileSync(gbrecompWasm),
     print: () => {},
     printErr: (s) => process.stderr.write(`[gbrecomp] ${s}\n`),
   });
-  const ptr = mod._malloc(rom.length);
+  const romPtr = mod._malloc(rom.length);
+  const annotationsBytes = annotationsText ? Buffer.from(annotationsText, 'utf8') : null;
+  const annotationsPtr = annotationsBytes?.length ? mod._malloc(annotationsBytes.length) : 0;
   try {
-    mod.HEAPU8.set(rom, ptr);
-    const compiled = mod._gbrecomp_wasm_compile(ptr, rom.length);
+    mod.HEAPU8.set(rom, romPtr);
+    let compiled;
+    if (annotationsBytes?.length) {
+      if (typeof mod._gbrecomp_wasm_compile_annotated !== 'function') {
+        throw new Error('GB Recompiled WebAssembly module does not expose annotated compilation');
+      }
+      mod.HEAPU8.set(annotationsBytes, annotationsPtr);
+      compiled = mod._gbrecomp_wasm_compile_annotated(
+        romPtr,
+        rom.length,
+        annotationsPtr,
+        annotationsBytes.length,
+      );
+    } else {
+      compiled = mod._gbrecomp_wasm_compile(romPtr, rom.length);
+    }
     if (compiled < 0) throw new Error(`GB Recompiled failed (${compiled}): ${lastError(mod)}`);
     const prepared = mod._gbrecomp_wasm_prepare_sgdk(rom.length);
     if (prepared < 0) throw new Error(`SGDK preparation failed (${prepared}): ${lastError(mod)}`);
@@ -49,7 +79,8 @@ async function recompile(gbrecompJs, gbrecompWasm, rom) {
     }
     return files;
   } finally {
-    mod._free(ptr);
+    if (annotationsPtr) mod._free(annotationsPtr);
+    mod._free(romPtr);
   }
 }
 
@@ -98,14 +129,16 @@ async function main() {
   }
 
   const rom = fs.readFileSync(romPath);
+  const annotations = findAnnotations(romPath);
   const started = performance.now();
-  const generated = await recompile(gbrecompJs, gbrecompWasm, rom);
+  const generated = await recompile(gbrecompJs, gbrecompWasm, rom, annotations?.text || '');
   const recompileDone = performance.now();
   const inputs = makeBuildInputs(generated, rom);
   const cc1Options = ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'];
   if (rom.length > 0x400000) cc1Options.push('-DGBRT_SGDK_USE_FAR_ROM');
 
   console.log(`GB Recompiled WASM: ${generated.size} prepared artifacts`);
+  console.log(`Annotations: ${annotations ? annotations.path : 'none'}`);
   console.log(`Genesis inputs: ${Object.keys(inputs.sources).length} sources, ${Object.keys(inputs.headers).length} headers, ${rom.length} ROM bytes`);
   console.log(`far-ROM accessor: ${rom.length > 0x400000 ? 'enabled' : 'not required'}`);
 
@@ -125,7 +158,7 @@ async function main() {
   fs.writeFileSync(outPath, finalRom);
 
   const finished = performance.now();
-  console.log(`PASS: GB/GBC -> gbrecomp.wasm -> m68k GCC/binutils WASM -> Genesis ROM`);
+  console.log('PASS: GB/GBC -> gbrecomp.wasm -> m68k GCC/binutils WASM -> Genesis ROM');
   console.log(`PASS: ${finalRom.length} bytes; header=${JSON.stringify(validation.system)}; checksum=0x${validation.checksum.toString(16).padStart(4, '0')}`);
   console.log(`Timing: recompile ${(recompileDone - started).toFixed(0)} ms; m68k+link ${(finished - recompileDone).toFixed(0)} ms; total ${(finished - started).toFixed(0)} ms`);
   console.log(outPath);
