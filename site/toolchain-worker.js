@@ -1,4 +1,27 @@
 const factoryCache = new Map();
+const wasmCache = new Map();
+
+function ensureBrowserProcess() {
+  if (globalThis.process) return;
+  const noop = () => {};
+  globalThis.process = {
+    argv: ['gbc-to-md-browser-tool'],
+    env: {},
+    versions: {},
+    platform: 'browser',
+    exitCode: 0,
+    cwd: () => '/work',
+    chdir: noop,
+    on: noop,
+    once: noop,
+    off: noop,
+    addListener: noop,
+    removeListener: noop,
+    emit: () => false,
+    stdout: { write: noop },
+    stderr: { write: noop },
+  };
+}
 
 function ensureDir(FS, dir) {
   const parts = dir.split('/').filter(Boolean);
@@ -33,28 +56,44 @@ function toBase64(bytes) {
   return btoa(text);
 }
 
-async function loadFactory(glueFile) {
-  if (factoryCache.has(glueFile)) return factoryCache.get(glueFile);
-  const url = new URL(`./toolchain/wasm/${glueFile}`, import.meta.url);
-  const factory = (await import(url.href)).default;
-  factoryCache.set(glueFile, factory);
-  return factory;
+async function loadTool(glueFile) {
+  ensureBrowserProcess();
+  if (!factoryCache.has(glueFile)) {
+    const glueUrl = new URL(`./toolchain/wasm/${glueFile}`, import.meta.url);
+    factoryCache.set(glueFile, import(glueUrl.href).then((module) => module.default));
+  }
+  if (!wasmCache.has(glueFile)) {
+    const wasmName = glueFile.replace(/\.mjs$/i, '.wasm');
+    const wasmUrl = new URL(`./toolchain/wasm/${wasmName}`, import.meta.url);
+    wasmCache.set(glueFile, fetch(wasmUrl).then(async (response) => {
+      if (!response.ok) throw new Error(`Failed to fetch ${wasmName}: HTTP ${response.status}`);
+      return new Uint8Array(await response.arrayBuffer());
+    }));
+  }
+  const [factory, wasmBinary] = await Promise.all([
+    factoryCache.get(glueFile),
+    wasmCache.get(glueFile),
+  ]);
+  return { factory, wasmBinary };
 }
 
 async function runJob(job) {
-  const factory = await loadFactory(job.glueFile);
+  const { factory, wasmBinary } = await loadTool(job.glueFile);
   let log = '';
   let capturedExit = null;
   const print = (msg) => { log += `${msg}\n`; };
 
   const mod = await factory({
+    wasmBinary,
     noInitialRun: true,
     print,
     printErr: print,
+    thisProgram: `/work/${job.tool || 'tool'}`,
+    arguments: [],
     locateFile: (name) => new URL(`./toolchain/wasm/${name}`, import.meta.url).href,
     quit: (status, error) => {
       capturedExit = status;
-      throw error || new Error(`exit ${status}`);
+      throw error || Object.assign(new Error(`exit ${status}`), { status });
     },
     onExit: (status) => { capturedExit = status; },
   });
