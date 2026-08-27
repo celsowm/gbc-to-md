@@ -176,6 +176,10 @@ jobs:
           /usr/bin/google-chrome --version
           node wasm/playground.e2e.mjs site fixtures/basicdemo.gb
 
+          python3 fixtures/make_mbc5test.py
+          PLAYGROUND_PORT=4174 node wasm/playground.e2e.mjs \
+            site fixtures/mbc5test.gb fixtures/mbc5test.annotations
+
       - name: Upload packaged playground for inspection
         uses: actions/upload-artifact@v4
         with:
