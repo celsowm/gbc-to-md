@@ -6,9 +6,14 @@ function ensureBrowserProcess() {
   const noop = () => {};
   globalThis.process = {
     argv: ['gbc-to-md-browser-tool'],
+    execArgv: [],
+    execPath: '/browser/node',
     env: {},
-    versions: {},
+    version: 'v24.0.0',
+    versions: { node: '24.0.0' },
     platform: 'browser',
+    arch: 'wasm32',
+    title: 'gbc-to-md-browser-tool',
     exitCode: 0,
     cwd: () => '/work',
     chdir: noop,
