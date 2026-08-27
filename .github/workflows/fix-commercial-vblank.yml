@@ -1,0 +1,92 @@
+name: Apply commercial VBlank runtime fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-commercial-vblank.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch host VBlank and canonical HRAM DMA
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: expected exactly one replacement target, got {text.count(old)}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'sgdk_runtime/include/gbrt.h',
+              '''    uint8_t host_vblank_sync;\n    uint8_t host_ly_reads;\n    uint16_t host_reserved;\n''',
+              '''    uint8_t host_vblank_sync;\n    uint8_t host_ly_reads;\n    uint16_t host_reserved;\n    uint32_t host_guest_cycle_budget;\n''')
+
+          replace_once(
+              'sgdk_runtime/include/gbrt.h',
+              '''    /* Host-VBlank mode advances DIV/TIMA from host frame time, not from the\n       small number of guest instructions that remain after PPU waits are\n       collapsed. This keeps timers running while the guest is HALTed. */\n    if (ctx->host_vblank_sync) return;\n    gbrt_sgdk_tick_slow(ctx, cycles);\n''',
+              '''    /* Host-VBlank mode advances DIV/TIMA from host frame time, not from the\n       generated instruction stream. A cheap per-frame guest-cycle budget is\n       still required so commercial busy-wait loops yield back to the host even\n       when they do not poll LY or execute HALT. */\n    if (ctx->host_vblank_sync) {\n        if (cycles >= ctx->host_guest_cycle_budget) {\n            ctx->host_guest_cycle_budget = 0u;\n            ctx->stopped = 1u;\n        } else {\n            ctx->host_guest_cycle_budget -= cycles;\n        }\n        return;\n    }\n    gbrt_sgdk_tick_slow(ctx, cycles);\n''')
+
+          replace_once(
+              'sgdk_runtime/src/gbrt_sgdk_min.c',
+              '''        if (addr == 0xFF44u) {\n            if (ctx->host_vblank_sync) {\n                /* First LY read in a host frame observes VBlank. The next one\n                   observes active display and yields to the Mega Drive VBlank.\n                   This collapses GB busy-wait scanline loops to O(1). */\n                if (ctx->host_ly_reads++ == 0u) {\n                    ctx->ly = 144u;\n                } else {\n                    ctx->ly = 0u;\n                    ctx->stopped = 1u;\n                }\n                if (ctx->md) ctx->md->io[0x44] = ctx->ly;\n            }\n            return ctx->ly;\n        }\n''',
+              '''        if (addr == 0xFF44u) {\n            if (ctx->host_vblank_sync) {\n                /* Preserve the observable VBlank scanlines instead of jumping\n                   directly from 144 to 0. Commercial games commonly wait for\n                   an exact LY value (Tetris waits for 148 during startup). */\n                const uint8_t read_index = ctx->host_ly_reads++;\n                if (read_index < 10u) {\n                    ctx->ly = (uint8_t)(144u + read_index);\n                } else {\n                    ctx->ly = 0u;\n                    ctx->stopped = 1u;\n                }\n                if (ctx->md) ctx->md->io[0x44] = ctx->ly;\n            }\n            return ctx->ly;\n        }\n''')
+
+          replace_once(
+              'sgdk_runtime/src/gbrt_sgdk_min.c',
+              '''        if (addr == 0xFF07u) {\n            if (ctx->md) ctx->md->io[0x07u] = (uint8_t)(value & 0x07u);\n            return;\n        }\n        if (addr != 0xFF44u) gbmd_write8(ctx->md, addr, value);\n''',
+              '''        if (addr == 0xFF07u) {\n            if (ctx->md) ctx->md->io[0x07u] = (uint8_t)(value & 0x07u);\n            return;\n        }\n        if (addr == 0xFF46u) {\n            /* OAM DMA is collapsed to an immediate 160-byte transfer. This is\n               sufficient for the canonical HRAM DMA stubs used by commercial\n               DMG games while keeping the target framebuffer-free. */\n            if (ctx->md) {\n                ctx->md->io[0x46u] = value;\n                const uint16_t source = (uint16_t)((uint16_t)value << 8);\n                for (uint16_t i = 0u; i < 160u; ++i) {\n                    gbmd_write8(ctx->md, (uint16_t)(0xFE00u + i),\n                                gb_read8(ctx, (uint16_t)(source + i)));\n                }\n            }\n            return;\n        }\n        if (addr != 0xFF44u) gbmd_write8(ctx->md, addr, value);\n''')
+
+          replace_once(
+              'sgdk_runtime/src/gbrt_sgdk_min.c',
+              '''void gbrt_sgdk_run_frame(GBContext *ctx, void (*run_generated)(GBContext *)) {\n    ctx->stopped = 0;\n    ctx->host_ly_reads = 0;\n''',
+              '''void gbrt_sgdk_run_frame(GBContext *ctx, void (*run_generated)(GBContext *)) {\n    ctx->stopped = 0;\n    ctx->host_ly_reads = 0;\n    ctx->host_guest_cycle_budget = ctx->host_vblank_sync ? 70224u : 0u;\n''')
+
+          replace_once(
+              'sgdk_runtime/src/gbrt_sgdk_min.c',
+              '''            if (ctx->halted) ctx->halted = 0;\n            if (!gbrt_sgdk_service_interrupt(ctx)) break;\n            ctx->stopped = 0;\n            run_generated(ctx);\n''',
+              '''            if (ctx->halted) ctx->halted = 0;\n            ctx->stopped = 0;\n            ctx->host_guest_cycle_budget = 70224u;\n            if (!gbrt_sgdk_service_interrupt(ctx)) break;\n            run_generated(ctx);\n''')
+
+          replace_once(
+              'sgdk_runtime/src/gbrt_sgdk_min.c',
+              '''bool gbrt_try_execute_hram_stub(GBContext *ctx, uint16_t addr) { (void)ctx;(void)addr;return false; }\n''',
+              '''bool gbrt_try_execute_hram_stub(GBContext *ctx, uint16_t addr) {\n    if (!ctx || addr < 0xFF80u || addr > 0xFFF5u) return false;\n    const size_t off = (size_t)(addr - 0xFF80u);\n    if (off + 10u > sizeof(ctx->hram)) return false;\n    const uint8_t *code = &ctx->hram[off];\n\n    /* Canonical DMG OAM-DMA stub copied into HRAM:\n         ld a,source_hi; ldh [FF46],a; ld a,28; dec a; jr nz,-3; ret\n       Tetris and many other cartridges use this exact shape. Recognizing the\n       semantic operation avoids embedding a general RAM-code interpreter. */\n    if (code[0] != 0x3Eu || code[2] != 0xE0u || code[3] != 0x46u ||\n        code[4] != 0x3Eu || code[5] != 0x28u || code[6] != 0x3Du ||\n        code[7] != 0x20u || code[8] != 0xFDu || code[9] != 0xC9u) {\n        return false;\n    }\n\n    ctx->a = code[1];\n    gb_write8(ctx, 0xFF46u, ctx->a);\n    ctx->a = 0u;\n    ctx->f_z = 1u;\n    ctx->f_n = 1u;\n    ctx->f_h = 0u;\n\n    const uint8_t lo = gb_read8(ctx, ctx->sp++);\n    const uint8_t hi = gb_read8(ctx, ctx->sp++);\n    ctx->pc = (uint16_t)(lo | ((uint16_t)hi << 8));\n    gb_tick(ctx, 680u);\n    return true;\n}\n''')
+
+          p = Path('tests/timer_runtime/test_timer_math.c')
+          text = p.read_text(encoding='utf-8')
+          old = '''    gb_write8(&ctx,0xFF04u,0x99u); assert(ctx.div_counter==0u && gb_read8(&ctx,0xFF04u)==0u);\n    puts("PASS: all TAC clock selectors, overflow/reload math and DIV reset"); return 0;\n}'''
+          new = '''    gb_write8(&ctx,0xFF04u,0x99u); assert(ctx.div_counter==0u && gb_read8(&ctx,0xFF04u)==0u);\n\n    /* Host-VBlank LY must expose all ten VBlank scanlines. Real cartridges\n       wait for exact values such as LY=148 rather than merely LY>=144. */\n    ctx.host_vblank_sync=1u; ctx.host_ly_reads=0u; ctx.stopped=0u;\n    for(unsigned i=0;i<10u;i++) assert(gb_read8(&ctx,0xFF44u)==(uint8_t)(144u+i));\n    assert(!ctx.stopped);\n    assert(gb_read8(&ctx,0xFF44u)==0u && ctx.stopped);\n\n    /* Generated busy loops must yield even when they never read LY. */\n    ctx.stopped=0u; ctx.host_guest_cycle_budget=32u;\n    gb_tick(&ctx,12u); assert(!ctx.stopped && ctx.host_guest_cycle_budget==20u);\n    gb_tick(&ctx,20u); assert(ctx.stopped && ctx.host_guest_cycle_budget==0u);\n\n    /* The canonical copied-to-HRAM DMA routine must perform OAM DMA and RET. */\n    for(unsigned i=0;i<160u;i++) ctx.wram[i]=(uint8_t)(i^0x5Au);\n    const uint8_t dma_stub[10]={0x3E,0xC0,0xE0,0x46,0x3E,0x28,0x3D,0x20,0xFD,0xC9};\n    for(unsigned i=0;i<10u;i++) ctx.hram[0x36u+i]=dma_stub[i];\n    ctx.sp=0xC100u; ctx.wram[0x100u]=0x34u; ctx.wram[0x101u]=0x12u;\n    ctx.stopped=0u; ctx.host_guest_cycle_budget=1000u;\n    assert(gbrt_try_execute_hram_stub(&ctx,0xFFB6u));\n    assert(ctx.pc==0x1234u && ctx.sp==0xC102u);\n    for(unsigned i=0;i<160u;i++) assert(md.oam[i]==(uint8_t)(i^0x5Au));\n\n    puts("PASS: timer math, commercial VBlank LY, host budget and HRAM OAM DMA"); return 0;\n}'''
+          if text.count(old) != 1:
+              raise SystemExit('timer math insertion target not found exactly once')
+          p.write_text(text.replace(old,new,1), encoding='utf-8')
+          PY
+
+      - name: Validate runtime regression
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic \
+            -Isgdk_runtime/include -Isrc \
+            src/gbmd_backend.c sgdk_runtime/src/gbrt_sgdk_min.c \
+            tests/timer_runtime/test_timer_math.c \
+            -o /tmp/gbmd_timer_runtime
+          /tmp/gbmd_timer_runtime
+
+      - name: Commit fix and remove one-shot workflow
+        run: |
+          rm .github/workflows/fix-commercial-vblank.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sgdk_runtime/include/gbrt.h sgdk_runtime/src/gbrt_sgdk_min.c tests/timer_runtime/test_timer_math.c .github/workflows/fix-commercial-vblank.yml
+          git commit -m 'fix: support commercial VBlank polling and HRAM DMA'
+          git push origin HEAD:main
