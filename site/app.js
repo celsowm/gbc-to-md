@@ -1,10 +1,12 @@
 import { analyzeRom } from './analyzer.js';
+import { buildMegaDriveRom } from './browser-build.js';
 
 const drop = document.querySelector('#drop-zone');
 const picker = document.querySelector('#rom-input');
 const result = document.querySelector('#result');
 const empty = document.querySelector('#empty-state');
 const recompile = document.querySelector('#recompile-button');
+const buildRom = document.querySelector('#build-rom-button');
 const fileName = document.querySelector('#file-name');
 const statusPill = document.querySelector('#status-pill');
 const compilerPanel = document.querySelector('#compiler-panel');
@@ -15,12 +17,17 @@ const previewName = document.querySelector('#preview-name');
 const sourcePreview = document.querySelector('#source-preview');
 const downloadFile = document.querySelector('#download-file');
 const wasmState = document.querySelector('#wasm-state');
+const romPanel = document.querySelector('#rom-panel');
+const romBuildStatus = document.querySelector('#rom-build-status');
+const romBuildSummary = document.querySelector('#rom-build-summary');
+const downloadRom = document.querySelector('#download-rom-button');
 
 let selectedFile = null;
 let selectedBytes = null;
 let moduleInstance = null;
 let generatedFiles = [];
 let selectedGenerated = null;
+let builtRom = null;
 
 function setText(id, value) { document.querySelector(id).textContent = value; }
 function yesNo(value) { return value ? 'Yes' : 'No'; }
@@ -60,6 +67,7 @@ function render(analysis, file) {
 
   recompile.disabled = moduleInstance === null;
   recompile.title = moduleInstance ? 'Run GB Recompiled locally in WebAssembly.' : 'WebAssembly recompiler is still loading.';
+  buildRom.disabled = generatedFiles.length === 0 || selectedBytes?.length > 0x400000;
 }
 
 function loadClassicScript(src) {
@@ -77,7 +85,7 @@ async function loadRecompiler() {
     await loadClassicScript('./wasm/gbrecomp_probe.js');
     if (typeof globalThis.createGBRecompProbe !== 'function') throw new Error('createGBRecompProbe was not exported');
     moduleInstance = await globalThis.createGBRecompProbe({
-      locateFile: (path) => `./wasm/${path}`,
+      locateFile: (p) => `./wasm/${p}`,
       print: () => {},
       printErr: (text) => console.error(text),
     });
@@ -96,11 +104,9 @@ function readWasmString(ptr, size) {
   if (!ptr || !size) return '';
   return new TextDecoder().decode(moduleInstance.HEAPU8.slice(ptr, ptr + size));
 }
-
 function readLastError() {
   return readWasmString(moduleInstance._gbrecomp_wasm_error_ptr(), moduleInstance._gbrecomp_wasm_error_size()) || 'Unknown recompiler error';
 }
-
 function collectGeneratedFiles() {
   const count = moduleInstance._gbrecomp_wasm_file_count();
   const files = [];
@@ -119,25 +125,21 @@ function selectGenerated(file) {
   downloadFile.disabled = false;
   document.querySelectorAll('.generated-file').forEach((node) => node.classList.toggle('selected', node.dataset.name === file.name));
 }
-
 function renderGeneratedFiles() {
   generatedFilesEl.replaceChildren();
   for (const file of generatedFiles) {
     const button = document.createElement('button');
     button.className = 'generated-file';
     button.dataset.name = file.name;
-    const name = document.createElement('span');
-    name.textContent = file.name;
-    const size = document.createElement('small');
-    size.textContent = `${file.bytes.toLocaleString()} B`;
-    button.append(name, size);
+    button.innerHTML = `<span></span><small>${file.bytes.toLocaleString()} B</small>`;
+    button.querySelector('span').textContent = file.name;
     button.addEventListener('click', () => selectGenerated(file));
     generatedFilesEl.append(button);
   }
 }
 
-function downloadText(name, content) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+function downloadBlob(name, data, type = 'application/octet-stream') {
+  const blob = new Blob([data], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -145,17 +147,21 @@ function downloadText(name, content) {
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 500);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 downloadFile.addEventListener('click', () => {
-  if (selectedGenerated) downloadText(selectedGenerated.name, selectedGenerated.content);
+  if (selectedGenerated) downloadBlob(selectedGenerated.name, selectedGenerated.content, 'text/plain;charset=utf-8');
+});
+downloadRom.addEventListener('click', () => {
+  if (builtRom) downloadBlob('rom.bin', builtRom);
 });
 
 async function compileSelectedRom() {
   if (!moduleInstance || !selectedBytes) return;
-
   compilerPanel.hidden = false;
+  romPanel.hidden = true;
+  builtRom = null;
   compileStatus.textContent = 'Recompiling…';
   compileSummary.textContent = '';
   generatedFilesEl.replaceChildren();
@@ -163,8 +169,8 @@ async function compileSelectedRom() {
   previewName.textContent = 'Working';
   downloadFile.disabled = true;
   recompile.disabled = true;
-
-  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  buildRom.disabled = true;
+  await new Promise((resolve) => requestAnimationFrame(resolve));
 
   const ptr = moduleInstance._malloc(selectedBytes.length);
   const started = performance.now();
@@ -172,7 +178,6 @@ async function compileSelectedRom() {
     moduleInstance.HEAPU8.set(selectedBytes, ptr);
     const generatedCount = moduleInstance._gbrecomp_wasm_compile(ptr, selectedBytes.length);
     if (generatedCount < 0) throw new Error(readLastError());
-
     const preparedCount = moduleInstance._gbrecomp_wasm_prepare_sgdk(selectedBytes.length);
     if (preparedCount < 0) throw new Error(readLastError());
 
@@ -182,13 +187,12 @@ async function compileSelectedRom() {
     compileStatus.textContent = 'Recompilation complete';
     compileSummary.textContent = `${generatedFiles.length} files · ${totalBytes.toLocaleString()} source bytes · ${elapsed.toFixed(0)} ms`;
     renderGeneratedFiles();
-
-    const preferred = generatedFiles.find((file) => file.name.endsWith('_functions.c'))
-      || generatedFiles.find((file) => file.name.endsWith('.c'))
-      || generatedFiles[0];
+    const preferred = generatedFiles.find((file) => /_funcs_\d+\.c$/.test(file.name)) || generatedFiles.find((file) => file.name.endsWith('.c')) || generatedFiles[0];
     if (preferred) selectGenerated(preferred);
+    buildRom.disabled = selectedBytes.length > 0x400000;
   } catch (error) {
     console.error(error);
+    generatedFiles = [];
     compileStatus.textContent = 'Recompilation failed';
     compileSummary.textContent = error instanceof Error ? error.message : String(error);
     previewName.textContent = 'Error';
@@ -199,7 +203,39 @@ async function compileSelectedRom() {
   }
 }
 
+async function buildSelectedRom() {
+  if (!selectedBytes || !generatedFiles.length) return;
+  buildRom.disabled = true;
+  recompile.disabled = true;
+  romPanel.hidden = false;
+  downloadRom.disabled = true;
+  romBuildStatus.textContent = 'Building Mega Drive ROM…';
+  romBuildSummary.textContent = 'Starting Motorola 68000 toolchain…';
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+
+  try {
+    const output = await buildMegaDriveRom({
+      romBytes: selectedBytes,
+      generatedFiles,
+      onProgress: (message) => { romBuildSummary.textContent = message; },
+    });
+    builtRom = output.rom;
+    romBuildStatus.textContent = 'Mega Drive ROM ready';
+    romBuildSummary.textContent = `${output.rom.length.toLocaleString()} bytes · checksum 0x${output.checksum.toString(16).padStart(4, '0')} · ${(output.elapsedMs / 1000).toFixed(2)} s`;
+    downloadRom.disabled = false;
+  } catch (error) {
+    console.error(error);
+    builtRom = null;
+    romBuildStatus.textContent = 'ROM build failed';
+    romBuildSummary.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    recompile.disabled = false;
+    buildRom.disabled = !generatedFiles.length || selectedBytes.length > 0x400000;
+  }
+}
+
 recompile.addEventListener('click', compileSelectedRom);
+buildRom.addEventListener('click', buildSelectedRom);
 
 async function handleFile(file) {
   if (!file) return;
@@ -214,7 +250,10 @@ async function handleFile(file) {
     selectedBytes = new Uint8Array(buffer);
     generatedFiles = [];
     selectedGenerated = null;
+    builtRom = null;
     compilerPanel.hidden = true;
+    romPanel.hidden = true;
+    buildRom.disabled = true;
     render(analyzeRom(buffer), file);
   } catch (error) {
     alert(error instanceof Error ? error.message : String(error));
@@ -223,15 +262,11 @@ async function handleFile(file) {
 
 picker.addEventListener('change', () => handleFile(picker.files?.[0]));
 drop.addEventListener('click', () => picker.click());
-drop.addEventListener('keydown', event => {
+drop.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); picker.click(); }
 });
-for (const name of ['dragenter', 'dragover']) {
-  drop.addEventListener(name, event => { event.preventDefault(); drop.dataset.dragging = 'true'; });
-}
-for (const name of ['dragleave', 'drop']) {
-  drop.addEventListener(name, event => { event.preventDefault(); drop.dataset.dragging = 'false'; });
-}
-drop.addEventListener('drop', event => handleFile(event.dataTransfer?.files?.[0]));
+for (const name of ['dragenter', 'dragover']) drop.addEventListener(name, (event) => { event.preventDefault(); drop.dataset.dragging = 'true'; });
+for (const name of ['dragleave', 'drop']) drop.addEventListener(name, (event) => { event.preventDefault(); drop.dataset.dragging = 'false'; });
+drop.addEventListener('drop', (event) => handleFile(event.dataTransfer?.files?.[0]));
 
 loadRecompiler();
