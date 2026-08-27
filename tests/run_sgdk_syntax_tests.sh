@@ -35,6 +35,13 @@ MBC1="$(sgdk_generated_dir mbc1test)"
 render_main mbc1test "$BUILD_DIR/syntax/main_mbc1test.c"
 "$CC" "${CFLAGS[@]}" -DGBRT_SGDK_USE_CART_SRAM -Wno-main -Itests/sgdk_stub -Isgdk_runtime/include -Isrc -I"$MBC1" -c "$BUILD_DIR/syntax/main_mbc1test.c" -o "$BUILD_DIR/syntax/main_mbc1test.o"
 "$CC" "${CFLAGS[@]}" -DGBRT_SGDK_USE_CART_SRAM -Itests/sgdk_stub -Isgdk_runtime/include -Isrc -c sgdk_runtime/src/gbrt_sgdk_min.c -o "$BUILD_DIR/syntax/gbrt_mbc1_sram.o"
+"$CC" "${CFLAGS[@]}" -DGBRT_SGDK_USE_CART_SRAM -Itests/sgdk_stub -Isgdk_runtime/include -Isrc -c sgdk_runtime/src/gbrt_cpu.c -o "$BUILD_DIR/syntax/gbrt_cpu.o"
+for symbol in gb_add8 gb_stop gb_rrca gb_daa gb_write16 gbrt_timed_bus_read8 gbrt_timed_hl_read_auto gbrt_timed_push16 gbrt_timed_pop16 gbrt_timed_rst; do
+  if ! nm "$BUILD_DIR/syntax/gbrt_cpu.o" "$BUILD_DIR/syntax/gbrt_mbc1_sram.o" | grep -Eq " [Tt] ${symbol}$"; then
+    echo "generated CPU helper missing from SGDK runtime: $symbol" >&2
+    exit 1
+  fi
+done
 
 "$CC" "${CFLAGS[@]}" -DGBRT_SGDK_USE_CART_SRAM -Itests/sgdk_stub -Isgdk_runtime/include -Isrc -c sgdk_runtime/src/gbrt_sgdk_min.c -o "$BUILD_DIR/syntax/gbrt_mbc35_sram.o"
 python3 tools/make_sgdk_rom_blob.py --rom fixtures/mbc3test.gb --out "$BUILD_DIR/syntax/mbc3_rom_blob.s" --incbin-path fixtures/mbc3test.gb
@@ -50,9 +57,9 @@ assert '.section .rodata_binf' in s
 assert s.index('rom_size:') < s.index('rom_data:')
 PY
 
-
 # Target-style header mode: SGDK owns bool/stdint/size_t aliases.
 "$CC" "${CFLAGS[@]}" -DSGDK_GCC -DGBRT_SGDK_USE_CART_SRAM -Itests/sgdk_stub -Isgdk_runtime/include -Isrc -c sgdk_runtime/src/gbrt_sgdk_min.c -o "$BUILD_DIR/syntax/gbrt_sgdk_target.o"
+"$CC" "${CFLAGS[@]}" -DSGDK_GCC -DGBRT_SGDK_USE_CART_SRAM -Itests/sgdk_stub -Isgdk_runtime/include -Isrc -c sgdk_runtime/src/gbrt_cpu.c -o "$BUILD_DIR/syntax/gbrt_cpu_sgdk_target.o"
 "$CC" "${CFLAGS[@]}" -DSGDK_GCC -Itests/sgdk_stub -Isrc -c src/gbmd_backend.c -o "$BUILD_DIR/syntax/gbmd_sgdk_target.o"
 
 echo "SGDK syntax gates passed."
