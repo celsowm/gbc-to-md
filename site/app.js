@@ -36,6 +36,10 @@ let builtRom = null;
 
 function setText(id, value) { document.querySelector(id).textContent = value; }
 function yesNo(value) { return value ? 'Yes' : 'No'; }
+function setBusy(panel, busy) {
+  panel.dataset.busy = busy ? 'true' : 'false';
+  panel.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
 
 function render(analysis, file) {
   empty.hidden = true;
@@ -165,10 +169,11 @@ downloadRom.addEventListener('click', () => {
 async function compileSelectedRom() {
   if (!moduleInstance || !selectedBytes) return;
   compilerPanel.hidden = false;
+  setBusy(compilerPanel, true);
   romPanel.hidden = true;
   builtRom = null;
   compileStatus.textContent = 'Recompiling…';
-  compileSummary.textContent = '';
+  compileSummary.textContent = 'Analyzing Game Boy code and generating native C…';
   generatedFilesEl.replaceChildren();
   sourcePreview.textContent = selectedAnnotationsText
     ? 'Running reachable-only static analysis with supplied annotations…'
@@ -177,7 +182,7 @@ async function compileSelectedRom() {
   downloadFile.disabled = true;
   recompile.disabled = true;
   buildRom.disabled = true;
-  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   const romPtr = moduleInstance._malloc(selectedBytes.length);
   const annotationsBytes = selectedAnnotationsText ? new TextEncoder().encode(selectedAnnotationsText) : null;
@@ -221,6 +226,7 @@ async function compileSelectedRom() {
     previewName.textContent = 'Error';
     sourcePreview.textContent = error instanceof Error ? error.stack || error.message : String(error);
   } finally {
+    setBusy(compilerPanel, false);
     if (annotationsPtr) moduleInstance._free(annotationsPtr);
     moduleInstance._free(romPtr);
     recompile.disabled = false;
@@ -232,10 +238,11 @@ async function buildSelectedRom() {
   buildRom.disabled = true;
   recompile.disabled = true;
   romPanel.hidden = false;
+  setBusy(romPanel, true);
   downloadRom.disabled = true;
   romBuildStatus.textContent = 'Building Mega Drive ROM…';
   romBuildSummary.textContent = 'Starting Motorola 68000 toolchain…';
-  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   try {
     const output = await buildMegaDriveRom({
@@ -253,6 +260,7 @@ async function buildSelectedRom() {
     romBuildStatus.textContent = 'ROM build failed';
     romBuildSummary.textContent = error instanceof Error ? error.message : String(error);
   } finally {
+    setBusy(romPanel, false);
     recompile.disabled = false;
     buildRom.disabled = !generatedFiles.length;
   }
@@ -300,6 +308,8 @@ async function handleFile(file, { keepAnnotations = false } = {}) {
     builtRom = null;
     compilerPanel.hidden = true;
     romPanel.hidden = true;
+    setBusy(compilerPanel, false);
+    setBusy(romPanel, false);
     buildRom.disabled = true;
     render(analyzeRom(buffer), file);
   } catch (error) {
@@ -332,4 +342,6 @@ for (const name of ['dragenter', 'dragover']) drop.addEventListener(name, (event
 for (const name of ['dragleave', 'drop']) drop.addEventListener(name, (event) => { event.preventDefault(); drop.dataset.dragging = 'false'; });
 drop.addEventListener('drop', (event) => handleDroppedFiles(event.dataTransfer?.files));
 
+setBusy(compilerPanel, false);
+setBusy(romPanel, false);
 loadRecompiler();
