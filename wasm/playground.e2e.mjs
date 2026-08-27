@@ -7,6 +7,8 @@ import { chromium } from 'playwright-core';
 const root = path.resolve(process.argv[2] || 'site');
 const fixture = path.resolve(process.argv[3] || 'fixtures/basicdemo.gb');
 const annotations = process.argv[4] ? path.resolve(process.argv[4]) : null;
+const fixtureName = path.basename(fixture);
+const annotationsName = annotations ? path.basename(annotations) : null;
 const port = Number(process.env.PLAYGROUND_PORT || 4173);
 const fixtureBytes = fs.statSync(fixture).size;
 const buildTimeoutMs = fixtureBytes > 0x400000 ? 600000 : 90000;
@@ -67,12 +69,16 @@ try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
   await page.waitForSelector('#wasm-state[data-ready="true"]', { timeout: 60000 });
   await page.setInputFiles('#rom-input', fixture);
+  await page.waitForFunction((expectedName) => {
+    return document.querySelector('#file-name')?.textContent === expectedName;
+  }, fixtureName, { timeout: 60000 });
+
   if (annotations) {
     await page.setInputFiles('#annotations-input', annotations);
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedName) => {
       const text = document.querySelector('#annotations-status')?.textContent || '';
-      return !text.includes('No sidecar');
-    }, null, { timeout: 10000 });
+      return text.includes(expectedName);
+    }, annotationsName, { timeout: 60000 });
   }
   await page.waitForSelector('#recompile-button:not([disabled])');
   await page.click('#recompile-button');
