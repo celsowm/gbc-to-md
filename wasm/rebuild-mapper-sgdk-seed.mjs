@@ -15,12 +15,12 @@ const result = await buildGenesisC({
   source,
   sgdk: true,
   rebuildSdk: true,
-  seedWrite: true,
+  writeSeed: true,
   cc1Options: ['-O2'],
 });
 
 if (!result?.ok) {
   throw new Error(`mapper-enabled SGDK seed rebuild failed at ${result?.stage || 'unknown'}\n${result?.log || ''}`);
 }
-console.log(`PASS: rebuilt mapper-enabled SGDK seed in ${((performance.now() - started) / 1000).toFixed(2)} s`);
+console.log(`PASS: rebuilt and persisted mapper-enabled SGDK seed in ${((performance.now() - started) / 1000).toFixed(2)} s`);
 console.log(result.log || '');
