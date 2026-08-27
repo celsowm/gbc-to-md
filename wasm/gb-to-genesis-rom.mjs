@@ -102,14 +102,17 @@ async function main() {
   const generated = await recompile(gbrecompJs, gbrecompWasm, rom);
   const recompileDone = performance.now();
   const inputs = makeBuildInputs(generated, rom);
+  const cc1Options = ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'];
+  if (rom.length > 0x400000) cc1Options.push('-DGBRT_SGDK_USE_FAR_ROM');
 
   console.log(`GB Recompiled WASM: ${generated.size} prepared artifacts`);
   console.log(`Genesis inputs: ${Object.keys(inputs.sources).length} sources, ${Object.keys(inputs.headers).length} headers, ${rom.length} ROM bytes`);
+  console.log(`far-ROM accessor: ${rom.length > 0x400000 ? 'enabled' : 'not required'}`);
 
   const result = await buildGenesisC({
     ...inputs,
     sgdk: true,
-    cc1Options: ['-O2', '-DGBRT_SGDK_USE_CART_SRAM'],
+    cc1Options,
   });
   if (!result?.ok || !(result.binary instanceof Uint8Array)) {
     const stage = result?.stage ? ` stage=${result.stage}` : '';
