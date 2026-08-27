@@ -3,8 +3,11 @@
 #include "recompiler/ir/ir_builder.h"
 #include "recompiler/rom.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -86,9 +89,109 @@ bool strip_line_containing(std::string &text, const std::string &marker) {
     text.erase(begin, end - begin);
     return true;
 }
+
+std::string trim_copy(std::string value) {
+    auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    return value;
 }
 
-extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_compile(const uint8_t *data, size_t size) {
+bool parse_hex_u32(const std::string &text, uint32_t &value) {
+    if (text.empty()) return false;
+    try {
+        size_t used = 0;
+        unsigned long parsed = std::stoul(text, &used, 16);
+        if (used != text.size() || parsed > 0xFFFFFFFFul) return false;
+        value = static_cast<uint32_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool parse_address(const std::string &token, uint32_t &combined) {
+    size_t colon = token.find(':');
+    uint32_t bank = 0;
+    uint32_t addr = 0;
+    if (colon == std::string::npos) {
+        if (!parse_hex_u32(token, addr) || addr > 0xFFFFu) return false;
+    } else {
+        if (!parse_hex_u32(token.substr(0, colon), bank) || bank > 0xFFFFu) return false;
+        if (!parse_hex_u32(token.substr(colon + 1), addr) || addr > 0xFFFFu) return false;
+    }
+    combined = (bank << 16) | addr;
+    return true;
+}
+
+bool parse_annotations(const char *text,
+                       size_t size,
+                       std::vector<gbrecomp::AnalysisAnnotation> &out,
+                       std::vector<uint32_t> &entry_points,
+                       std::string &error) {
+    if (text == nullptr || size == 0) return true;
+
+    std::istringstream input(std::string(text, size));
+    std::string line;
+    size_t line_number = 0;
+    while (std::getline(input, line)) {
+        ++line_number;
+        size_t comment = line.find('#');
+        if (comment != std::string::npos) line.erase(comment);
+        line = trim_copy(line);
+        if (line.empty()) continue;
+
+        std::istringstream fields(line);
+        std::string kind_text;
+        std::string address_text;
+        fields >> kind_text >> address_text;
+        if (kind_text.empty() || address_text.empty()) {
+            error = "invalid annotation at line " + std::to_string(line_number);
+            return false;
+        }
+
+        std::transform(kind_text.begin(), kind_text.end(), kind_text.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+        gbrecomp::AnalysisAnnotation annotation;
+        if (!parse_address(address_text, annotation.addr)) {
+            error = "invalid annotation address at line " + std::to_string(line_number) + ": " + address_text;
+            return false;
+        }
+
+        if (kind_text == "function") {
+            annotation.kind = gbrecomp::AnalysisAnnotationKind::FUNCTION;
+            annotation.size = 1;
+            entry_points.push_back(annotation.addr);
+        } else if (kind_text == "label") {
+            annotation.kind = gbrecomp::AnalysisAnnotationKind::LABEL;
+            annotation.size = 1;
+        } else if (kind_text == "data") {
+            annotation.kind = gbrecomp::AnalysisAnnotationKind::DATA;
+            annotation.size = 1;
+            std::string size_text;
+            if (fields >> size_text) {
+                uint32_t parsed_size = 0;
+                if (!parse_hex_u32(size_text, parsed_size) || parsed_size == 0) {
+                    error = "invalid data annotation size at line " + std::to_string(line_number);
+                    return false;
+                }
+                annotation.size = parsed_size;
+            }
+        } else {
+            error = "unsupported annotation kind at line " + std::to_string(line_number) + ": " + kind_text;
+            return false;
+        }
+
+        out.push_back(annotation);
+    }
+    return true;
+}
+
+int32_t compile_impl(const uint8_t *data,
+                     size_t size,
+                     const char *annotations_text,
+                     size_t annotations_size) {
     g_files.clear();
     g_last_error.clear();
 
@@ -108,6 +211,20 @@ extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_compile(const uint8_t *data, s
     analysis_options.aggressive_scan = false;
     analysis_options.verbose = false;
     analysis_options.trace_log = false;
+
+    if (annotations_text != nullptr && annotations_size != 0) {
+        if (!parse_annotations(annotations_text,
+                               annotations_size,
+                               analysis_options.annotations,
+                               analysis_options.entry_points,
+                               g_last_error)) {
+            return -4;
+        }
+        // Match the native --reachable-only + --no-scan workflow used for
+        // large banked ROMs. Explicit FUNCTION annotations become roots while
+        // DATA annotations suppress false code discovery.
+        analysis_options.analyze_all_banks = false;
+    }
 
     auto analysis = gbrecomp::analyze(*rom, analysis_options);
 
@@ -139,6 +256,19 @@ extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_compile(const uint8_t *data, s
         return -3;
     }
     return static_cast<int32_t>(g_files.size());
+}
+}
+
+extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_compile(const uint8_t *data, size_t size) {
+    return compile_impl(data, size, nullptr, 0);
+}
+
+extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_compile_annotated(
+    const uint8_t *data,
+    size_t size,
+    const char *annotations_text,
+    size_t annotations_size) {
+    return compile_impl(data, size, annotations_text, annotations_size);
 }
 
 extern "C" GBMD_WASM_EXPORT int32_t gbrecomp_wasm_prepare_sgdk(size_t rom_size) {
