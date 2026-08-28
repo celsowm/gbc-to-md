@@ -49,7 +49,7 @@ jobs:
             openjdk-17-jre-headless
 
       - name: Cache dependency downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .deps/downloads
           key: gbc-to-md-sgdk-deps-${{ hashFiles('versions.env') }}

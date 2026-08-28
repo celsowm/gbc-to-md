@@ -29,7 +29,7 @@ jobs:
             openjdk-17-jre-headless
 
       - name: Cache downloaded dependency archives
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .deps/downloads
           key: gbc-to-md-host-deps-${{ hashFiles('versions.env') }}
