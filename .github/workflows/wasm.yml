@@ -93,7 +93,7 @@ jobs:
           npm install --no-save --no-package-lock --ignore-scripts \
             "${ROMDEV_M68K_WASM_PACKAGE}@${ROMDEV_M68K_WASM_VERSION}"
       - name: Download GB Recompiled WebAssembly
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: gbrecomp-wasm-probe
           path: build/wasm/dist
@@ -152,7 +152,7 @@ jobs:
       - name: Rebuild matching SGDK seed entirely through WebAssembly tools
         run: node wasm/rebuild-mapper-sgdk-seed.mjs
       - name: Download GB Recompiled WebAssembly
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: gbrecomp-wasm-probe
           path: build/wasm/dist
@@ -200,7 +200,7 @@ jobs:
       - name: Generate reference fixture
         run: python3 fixtures/make_basicdemo.py
       - name: Download WebAssembly recompiler artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: gbrecomp-wasm-probe
           path: build/wasm/dist
