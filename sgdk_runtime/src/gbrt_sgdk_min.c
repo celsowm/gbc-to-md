@@ -242,17 +242,17 @@ uint8_t gb_read8(GBContext *ctx, uint16_t addr) {
         if (addr == 0xFF07u) return (uint8_t)(0xF8u | (ctx->md ? (ctx->md->io[0x07u] & 0x07u) : 0u));
         if (addr == 0xFF44u) {
             if (ctx->host_vblank_sync) {
-                /* Preserve the observable VBlank scanlines instead of jumping
-                   directly from 144 to 0. Commercial games commonly wait for
-                   an exact LY value (Tetris waits for 148 during startup). */
-                const uint8_t read_index = ctx->host_ly_reads++;
-                if (read_index < 10u) {
-                    ctx->ly = (uint8_t)(144u + read_index);
-                } else {
-                    ctx->ly = 0u;
-                    ctx->stopped = 1u;
-                }
-                if (ctx->md) ctx->md->io[0x44] = ctx->ly;
+                /* A host frame starts at guest LY=144. Reads must never advance
+                   LY: Tetris and other games busy-wait on its actual value.
+                   Derive it lazily from guest cycles consumed in this frame.
+                   The budget is saturated by gb_tick, so elapsed is bounded. */
+                const uint32_t remaining = ctx->host_guest_cycle_budget;
+                const uint32_t elapsed = GBRT_GUEST_CYCLES_PER_FRAME -
+                    (remaining <= GBRT_GUEST_CYCLES_PER_FRAME
+                        ? remaining : GBRT_GUEST_CYCLES_PER_FRAME);
+                ctx->ly = (uint8_t)((144u + elapsed / GBRT_GUEST_CYCLES_PER_LINE)
+                                    % GBRT_GUEST_LINES_PER_FRAME);
+                if (ctx->md) ctx->md->io[0x44u] = ctx->ly;
             }
             return ctx->ly;
         }
@@ -481,8 +481,8 @@ static bool gbrt_sgdk_service_interrupt(GBContext *ctx) {
 
 void gbrt_sgdk_run_frame(GBContext *ctx, void (*run_generated)(GBContext *)) {
     ctx->stopped = 0;
-    ctx->host_ly_reads = 0;
-    ctx->host_guest_cycle_budget = ctx->host_vblank_sync ? 70224u : 0u;
+    ctx->host_guest_cycle_budget =
+        ctx->host_vblank_sync ? GBRT_GUEST_CYCLES_PER_FRAME : 0u;
 #ifdef GBRT_SGDK_PROFILE
     ctx->profile_generated_entries++;
 #endif
@@ -527,7 +527,7 @@ void gbrt_sgdk_run_frame(GBContext *ctx, void (*run_generated)(GBContext *)) {
             if (!(ctx->ime && pending)) break;
             if (ctx->halted) ctx->halted = 0;
             ctx->stopped = 0;
-            ctx->host_guest_cycle_budget = 70224u;
+            ctx->host_guest_cycle_budget = GBRT_GUEST_CYCLES_PER_FRAME;
             if (!gbrt_sgdk_service_interrupt(ctx)) break;
             run_generated(ctx);
         }

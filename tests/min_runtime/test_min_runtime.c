@@ -48,7 +48,48 @@ static void set_bg_row(void *u, uint16_t y, const uint8_t tiles[32], uint8_t p) 
   v->map_rows++;
 }
 
+
+/* Regression: LY reflects elapsed guest cycles, not the number of reads.
+   Tetris waits for LY=148 during startup; repeated reads in the same
+   scanline must remain stable and must not yield the CPU by themselves. */
+static void test_host_ly_clock(void) {
+  GBMDBackend md;
+  GBContext ctx;
+  gbmd_init(&md, NULL, NULL);
+  gbrt_sgdk_context_init(&ctx, &md);
+  ctx.ly = 144u;
+  ctx.host_guest_cycle_budget = GBRT_GUEST_CYCLES_PER_FRAME;
+
+  for (unsigned i = 0; i < 32u; ++i) {
+    assert(gb_read8(&ctx, 0xFF44u) == 144u);
+    assert(!ctx.stopped);
+  }
+  gb_tick(&ctx, 455u);
+  assert(gb_read8(&ctx, 0xFF44u) == 144u);
+  gb_tick(&ctx, 1u);
+  assert(gb_read8(&ctx, 0xFF44u) == 145u);
+  gb_tick(&ctx, 3u * GBRT_GUEST_CYCLES_PER_LINE);
+  for (unsigned i = 0; i < 32u; ++i) {
+    assert(gb_read8(&ctx, 0xFF44u) == 148u);
+    assert(!ctx.stopped);
+  }
+  assert(md.io[0x44u] == 148u);
+  gb_tick(&ctx, 5u * GBRT_GUEST_CYCLES_PER_LINE);
+  assert(gb_read8(&ctx, 0xFF44u) == 153u);
+  gb_tick(&ctx, GBRT_GUEST_CYCLES_PER_LINE);
+  assert(gb_read8(&ctx, 0xFF44u) == 0u);
+  gb_tick(&ctx, 143u * GBRT_GUEST_CYCLES_PER_LINE);
+  assert(gb_read8(&ctx, 0xFF44u) == 143u);
+  assert(!ctx.stopped);
+  gb_tick(&ctx, GBRT_GUEST_CYCLES_PER_LINE);
+  assert(ctx.stopped);
+  assert(ctx.host_guest_cycle_budget == 0u);
+  assert(gb_read8(&ctx, 0xFF44u) == 144u);
+  puts("PASS: host LY is stable across reads, follows guest cycles 144..153..0..143, and yields only on budget exhaustion");
+}
+
 int main(void) {
+  test_host_ly_clock();
   FakeVDP v = {0};
   GBMDVideoOps ops = {load_tile, set_bg, set_sprite, set_scroll, set_bg_row};
   GBMDBackend md;

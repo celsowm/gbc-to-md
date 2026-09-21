@@ -94,10 +94,10 @@ typedef struct GBContext {
     uint16_t far_rom_reserved;
     uint32_t far_rom_switches;
 
-    /* Mega Drive host-vblank mode: avoid emulating the GB PPU clock. */
+    /* Host frame begins at LY=144. Remaining guest cycles provide a
+       read-independent LY clock without a per-instruction PPU scheduler. */
     uint8_t host_vblank_sync;
-    uint8_t host_ly_reads;
-    uint16_t host_reserved;
+    uint8_t host_reserved[3];
     uint32_t host_guest_cycle_budget;
 #ifdef GBRT_SGDK_PROFILE
     uint64_t total_cycles;
@@ -125,6 +125,10 @@ uint8_t gb_read8(GBContext *ctx, uint16_t addr);
 void gb_write8(GBContext *ctx, uint16_t addr, uint8_t value);
 void gbrt_sgdk_tick_slow(GBContext *ctx, uint32_t cycles);
 void gbrt_sgdk_advance_host_clock(GBContext *ctx, uint32_t cycles);
+
+#define GBRT_GUEST_CYCLES_PER_LINE 456u
+#define GBRT_GUEST_LINES_PER_FRAME 154u
+#define GBRT_GUEST_CYCLES_PER_FRAME (GBRT_GUEST_CYCLES_PER_LINE * GBRT_GUEST_LINES_PER_FRAME)
 
 /* Hot path used by generated code. In the Mega Drive host-vblank mode this
    stays entirely inline and never enters the scanline scheduler. */

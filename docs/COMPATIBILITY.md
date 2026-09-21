@@ -77,3 +77,18 @@ The current host-size proxy for `GBContext + GBMDBackend` is roughly in the high
 ## Current proof boundary
 
 The project has strong host-side evidence for the architecture and mapper/timing fixtures. The next evidence level is a reproducible m68k/SGDK link plus emulator/hardware boot and real 68000 size/cycle measurements. The GitHub SGDK workflow exists to make that proof reproducible.
+
+## Host-VBlank LY regression (Tetris startup)
+
+In the host-VBlank fast path, reads of FF44 (LY) now derive the guest line from
+guest cycles consumed since the beginning of the host frame (which starts at
+LY=144). Multiple reads without a clock advance return the same line. The
+144..153..0..143 transition is tested in `tests/min_runtime/test_min_runtime.c`,
+including the LY=148 startup polling case. Merely reading LY no longer yields
+execution or advances the scanline.
+
+This corrects one known timing shortcut; it **does not establish Tetris game
+compatibility**. The frame clock is still a fast-path approximation, STAT
+interrupt and scanline-accurate LCD events are not implemented, and the
+general-purpose runtime dispatch fallback still stops on uncompiled targets.
+See `docs/TETRIS_COMPATIBILITY_PLAN.md` for the remaining validation work.
