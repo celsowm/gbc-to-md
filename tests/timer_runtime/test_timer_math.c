@@ -20,12 +20,20 @@ int main(void){
     assert(md.io[0x05]==252u && (md.io[0x0F]&0x04u));
     gb_write8(&ctx,0xFF04u,0x99u); assert(ctx.div_counter==0u && gb_read8(&ctx,0xFF04u)==0u);
 
-    /* Host-VBlank LY must expose all ten VBlank scanlines. Real cartridges
-       wait for exact values such as LY=148 rather than merely LY>=144. */
-    ctx.host_vblank_sync=1u; ctx.host_ly_reads=0u; ctx.stopped=0u;
-    for(unsigned i=0;i<10u;i++) assert(gb_read8(&ctx,0xFF44u)==(uint8_t)(144u+i));
+    /* LY must be stable across reads and advance only with guest cycles.
+       In particular, a Tetris-style poll for line 148 must not change LY. */
+    ctx.host_vblank_sync=1u;
+    ctx.host_guest_cycle_budget=GBRT_GUEST_CYCLES_PER_FRAME;
+    ctx.stopped=0u;
+    for(unsigned i=0;i<10u;i++) assert(gb_read8(&ctx,0xFF44u)==144u);
     assert(!ctx.stopped);
-    assert(gb_read8(&ctx,0xFF44u)==0u && ctx.stopped);
+    for(unsigned i=1;i<=9u;i++) {
+        gb_tick(&ctx,GBRT_GUEST_CYCLES_PER_LINE);
+        assert(gb_read8(&ctx,0xFF44u)==(uint8_t)(144u+i));
+    }
+    assert(!ctx.stopped);
+    gb_tick(&ctx,GBRT_GUEST_CYCLES_PER_LINE);
+    assert(gb_read8(&ctx,0xFF44u)==0u && !ctx.stopped);
 
     /* Generated busy loops must yield even when they never read LY. */
     ctx.stopped=0u; ctx.host_guest_cycle_budget=32u;
